@@ -14,6 +14,8 @@ block_cipher = None
 datas = []
 binaries = []
 
+
+
 # Voeg applicatie data toe
 datas += [
     ('LICENSE', '.'),
@@ -41,6 +43,10 @@ try:
 except:
     pass
 
+
+
+
+
 # Verzamel numpy data
 try:
     numpy_datas = collect_data_files('numpy')
@@ -59,6 +65,25 @@ hiddenimports += [
     'tkinter.ttk',
     'tkinter.simpledialog',
     'threading',
+    'multiprocessing',
+    'multiprocessing.pool',
+    'multiprocessing.managers',
+    'multiprocessing.synchronize',
+    'multiprocessing.heap',
+    'multiprocessing.queues',
+    'multiprocessing.connection',
+    'multiprocessing.reduction',
+    'pickle',
+    'pickletools',
+    'unittest',
+    'unittest.mock',
+    'unittest.case',
+    'unittest.suite',
+    'unittest.loader',
+    'unittest.runner',
+    'unittest.result',
+    'unittest.signals',
+    'unittest.main',
     'json',
     'os',
     'shutil',
@@ -92,6 +117,36 @@ try:
 except:
     pass
 
+# Voeg specifieke scipy modules toe
+hiddenimports += [
+    'scipy.sparse.csgraph._shortest_path',
+    'scipy.sparse.csgraph._validation',
+    'scipy.sparse.csgraph._tools',
+    'scipy.sparse.csgraph._min_spanning_tree',
+    'scipy.sparse.csgraph._connected_components',
+    'scipy.sparse.csgraph._flow',
+    'scipy.sparse.csgraph._reordering',
+    'scipy.sparse.csgraph._traversal',
+    'scipy.sparse.csgraph._laplacian',
+    'scipy.sparse.csgraph._spectral',
+    'scipy.sparse.csgraph._matching',
+    'scipy.sparse.csgraph._validation',
+    'scipy.sparse.csgraph._tools',
+    'scipy.sparse.csgraph._shortest_path',
+    'scipy.sparse.csgraph._min_spanning_tree',
+    'scipy.sparse.csgraph._connected_components',
+    'scipy.sparse.csgraph._flow',
+    'scipy.sparse.csgraph._reordering',
+    'scipy.sparse.csgraph._traversal',
+    'scipy.sparse.csgraph._laplacian',
+    'scipy.sparse.csgraph._spectral',
+    'scipy.sparse.csgraph._matching',
+]
+
+
+
+
+
 try:
     numpy_modules = collect_submodules('numpy')
     hiddenimports.extend(numpy_modules)
@@ -120,14 +175,12 @@ excludes = [
     'sphinx',
     'docutils',
     'pytest',
-    'unittest',
     'doctest',
     'pdb',
     'profile',
     'pstats',
     'cProfile',
     'trace',
-    'pickle',
     'pickletools',
     'shelve',
     'dbm',
@@ -144,9 +197,9 @@ a = Analysis(
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
-    hookspath=[],
+    hookspath=['.'],
     hooksconfig={},
-    runtime_hooks=[],
+    runtime_hooks=['runtime_hook.py'],
     excludes=excludes,
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

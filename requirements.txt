@@ -7,8 +7,8 @@ requests>=2.25.1         # HTTP requests voor online databases (LastFM, MusicBra
 
 # Audio processing voor Shazam-achtige functionaliteit (optioneel)
 librosa>=0.9.2           # Audio analyse en fingerprinting
-scipy>=1.7.0             # Wetenschappelijke berekeningen voor audio processing
-numpy>=1.21.0            # Numerieke berekeningen voor audio analyse
+scipy>=1.7.0,<1.12.0     # Wetenschappelijke berekeningen voor audio processing
+numpy>=1.21.0,<2.0.0     # Numerieke berekeningen voor audio analyse
 
 # Audio processing dependencies (optioneel)
 soundfile>=0.10.3        # Audio bestand lezen/schrijven

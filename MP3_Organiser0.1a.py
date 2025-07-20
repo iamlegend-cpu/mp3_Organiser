@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # 🎵 MP3 Organiser 0.1a - Slimme Muziek Organisatie
 # 📦 Imports
 import os
@@ -3690,64 +3691,34 @@ Voor onbekende bestanden:
         return artist.title()
     
     def create_hierarchical_folders(self, base_folder, artist, filename):
-        """Maakt hiërarchische mappen aan of vindt bestaande"""
+        """Geeft het pad van de hiërarchische map terug, maar maakt deze niet aan"""
         if self.hierarchical_var.get():
             # Hiërarchische structuur: Letter/Artiest/
             first_letter = artist[0].upper()
             letter_folder = os.path.join(base_folder, first_letter)
-            
-            # Controleer of hiërarchische structuur al bestaat
-            if os.path.exists(letter_folder):
-                # Zoek bestaande artiest map
-                for existing_artist in os.listdir(letter_folder):
-                    if existing_artist.lower() == artist.lower():
-                        artist_folder = os.path.join(letter_folder, existing_artist)
-                        break
-                else:
-                    # Maak nieuwe artiest map
-                    artist_folder = os.path.join(letter_folder, artist)
-                    os.makedirs(artist_folder, exist_ok=True)
-            else:
-                # Maak nieuwe hiërarchische structuur
-                os.makedirs(letter_folder, exist_ok=True)
-                artist_folder = os.path.join(letter_folder, artist)
-                os.makedirs(artist_folder, exist_ok=True)
+            # Zoek bestaande artiest map
+            artist_folder = os.path.join(letter_folder, artist)
         else:
             # Directe structuur: Artiest/
-            # Zoek bestaande artiest map
-            for existing_artist in os.listdir(base_folder):
-                if existing_artist.lower() == artist.lower():
-                    artist_folder = os.path.join(base_folder, existing_artist)
-                    break
-            else:
-                # Maak nieuwe artiest map
-                artist_folder = os.path.join(base_folder, artist)
-            os.makedirs(artist_folder, exist_ok=True)
-        
+            artist_folder = os.path.join(base_folder, artist)
         # Album organisatie
         if self.albums_var.get():
             try:
                 audio = MP3(filename, ID3=ID3)
                 if audio.tags and 'TALB' in audio.tags:
                     album_name = audio.tags['TALB'][0]
-                    album_folder = os.path.join(artist_folder, album_name)
-                    os.makedirs(album_folder, exist_ok=True)
-                    artist_folder = album_folder
+                    artist_folder = os.path.join(artist_folder, album_name)
             except:
                 pass
-        
         # Jaar organisatie
         if self.years_var.get():
             try:
                 audio = MP3(filename, ID3=ID3)
                 if audio.tags and 'TYER' in audio.tags:
                     year = audio.tags['TYER'][0]
-                    year_folder = os.path.join(artist_folder, year)
-                    os.makedirs(year_folder, exist_ok=True)
-                    artist_folder = year_folder
+                    artist_folder = os.path.join(artist_folder, year)
             except:
                 pass
-        
         return artist_folder
     
     def start_organization(self):
@@ -3792,63 +3763,51 @@ Voor onbekende bestanden:
         """Organiseert bestanden"""
         try:
             self.log_message("🎵 Start organisatie...")
-            
             # Vind alle MP3 bestanden
             mp3_files = []
             for root, dirs, files in os.walk(source_folder):
                 for file in files:
                     if file.lower().endswith('.mp3'):
                         mp3_files.append(os.path.join(root, file))
-            
             if not mp3_files:
                 self.log_message("❌ Geen MP3 bestanden gevonden!")
                 self.progress_var.set("Geen MP3 bestanden gevonden")
                 return
-            
             total_files = len(mp3_files)
             self.log_message(f"📁 Gevonden: {total_files} MP3 bestanden")
             self.progress_var.set(f"Start organisatie van {total_files} bestanden...")
-            
             # Organiseer bestanden
             processed = 0
             artists_organized = {}
             moved_files = []  # Voor undo functionaliteit
-            
             for file_path in mp3_files:
                 # Controleer kill switch
                 if self.stop_processing:
                     self.log_message("🛑 Verwerking gestopt door gebruiker")
                     break
-                
                 try:
                     # Detecteer artiest en titel
                     artist = self.detect_artist(file_path)
                     title = self.detect_title(file_path)
-                    
                     # Hernoem bestand als optie is ingeschakeld
                     if self.config.get('rename_files', False):
                         file_path = self.rename_file_to_artist_title(file_path, artist, title)
                         filename = os.path.basename(file_path)
                     else:
                         filename = os.path.basename(file_path)
-                    
-                    # Maak mappen
+                    # Bepaal doelmap (maar maak nog niet aan)
                     artist_folder = self.create_hierarchical_folders(dest_folder, artist, file_path)
-                    
                     # Verplaats bestand
                     dest_path = os.path.join(artist_folder, filename)
-                    
                     # Controleer duplicaten
                     if os.path.exists(dest_path):
                         if self.duplicate_check_var.get():
                             duplicate_remove = getattr(self, 'duplicate_remove_var', tk.BooleanVar(value=False)).get()
                             duplicate_move = getattr(self, 'duplicate_move_var', tk.BooleanVar(value=False)).get()
-                            
                             if duplicate_remove:
                                 # Automatisch verwijderen
                                 self.log_message(f"🗑️ Verwijdert duplicaat: {filename}")
                                 continue
-                                
                             elif duplicate_move:
                                 # Verplaatsen naar geselecteerde duplicaten output map
                                 duplicate_output = getattr(self, 'duplicate_output_var', tk.StringVar(value="Duplicaten")).get()
@@ -3861,30 +3820,24 @@ Voor onbekende bestanden:
                                 else:
                                     # Fallback naar standaard duplicaten map
                                     duplicates_folder = os.path.join(dest_folder, "Duplicaten")
-                                
                                 os.makedirs(duplicates_folder, exist_ok=True)
-                                
                                 base, ext = os.path.splitext(filename)
                                 counter = 1
                                 new_filename = f"{base}_{counter}{ext}"
                                 while os.path.exists(os.path.join(duplicates_folder, new_filename)):
                                     counter += 1
                                     new_filename = f"{base}_{counter}{ext}"
-                                
                                 dest_path = os.path.join(duplicates_folder, new_filename)
                                 self.log_message(f"📁 Verplaatst duplicaat: {filename} → {os.path.basename(duplicates_folder)}/{new_filename}")
                             else:
-                                # Overschrijf bestaande bestanden
                                 self.log_message(f"⚠️ Overschrijft bestaand bestand: {filename}")
                         else:
-                            # Overschrijf bestaande bestanden
                             self.log_message(f"⚠️ Overschrijft bestaand bestand: {filename}")
-                    
+                    # Maak doelmap pas nu aan
+                    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
                     # Bewaar originele pad voor undo
                     original_path = file_path
-                    
                     shutil.move(file_path, dest_path)
-                    
                     # Voeg toe aan undo lijst
                     moved_files.append({
                         'original_path': original_path,
@@ -3892,30 +3845,24 @@ Voor onbekende bestanden:
                         'artist': artist,
                         'filename': filename
                     })
-                    
                     # Update statistieken
                     if artist not in artists_organized:
                         artists_organized[artist] = 0
                     artists_organized[artist] += 1
                     processed += 1
-                    
                     # Update progress met percentage
                     progress = (processed / len(mp3_files)) * 100
                     percentage = int((processed / len(mp3_files)) * 100)
                     self.progress_bar['value'] = progress
                     self.progress_var.set(f"Verwerkt: {processed}/{len(mp3_files)} ({percentage}%)")
-                    
                     self.log_message(f"✅ {filename} → {artist}")
-                    
                 except Exception as e:
                     self.log_message(f"❌ Fout bij {os.path.basename(file_path)}: {str(e)}")
-            
             # Toon resultaten
             self.log_message("🎉 Organisatie voltooid!")
             self.log_message("📊 Resultaten:")
             for artist, count in artists_organized.items():
                 self.log_message(f"  - {artist}: {count} nummers")
-            
             # Voeg operatie toe aan undo stack
             if moved_files:
                 self._add_undo_operation('organize', {
@@ -3923,16 +3870,11 @@ Voor onbekende bestanden:
                     'total_files': len(moved_files),
                     'artists_organized': artists_organized
                 })
-            
             self.progress_var.set("Organisatie voltooid!")
-            
         except Exception as e:
             self.log_message(f"❌ Fout tijdens organisatie: {str(e)}")
         finally:
-            # Reset thread referentie
             self.current_thread = None
-            
-            # Vrijgeven GUI
             self.unblock_gui()
     
 
