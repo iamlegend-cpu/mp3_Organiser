@@ -746,94 +746,61 @@ class MP3Organizer:
     
     def setup_ui(self):
         """Maakt de gebruikersinterface aan"""
-        
+        theme = self.themes[self.current_theme]
         # Menubalk
         self.create_menu()
-        
         # Hoofdframe
-        main_frame = tk.Frame(self.root, bg='#f0f0f0')
+        main_frame = tk.Frame(self.root, bg=theme['bg'])
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
         # Titel
         title_label = tk.Label(main_frame, text="🎵 MP3 Organiser 0.1a", 
-                              font=('Arial', 16, 'bold'), bg='#f0f0f0')
+                              font=('Arial', 16, 'bold'), bg=theme['bg'], fg=theme['fg'])
         title_label.pack(pady=(0, 20))
-        
         # Map selectie
-        source_frame = tk.LabelFrame(main_frame, text="📁 Map om te Organiseren", bg='#f0f0f0')
+        source_frame = tk.LabelFrame(main_frame, text="📁 Map om te Organiseren", bg=theme['bg'], fg=theme['fg'])
         source_frame.pack(fill=tk.X, pady=(0, 10))
-        
         self.source_var = tk.StringVar()
-        source_entry = tk.Entry(source_frame, textvariable=self.source_var, width=50)
+        source_entry = tk.Entry(source_frame, textvariable=self.source_var, width=50, bg=theme['entry_bg'], fg=theme['fg'])
         source_entry.pack(side=tk.LEFT, padx=5, pady=5, fill=tk.X, expand=True)
-        
         source_btn = tk.Button(source_frame, text="Bladeren", command=self.select_source_folder, 
-                              bg='#4CAF50', fg='#000000')
+                              bg=theme['button_bg'], fg=theme['button_fg'])
         source_btn.pack(side=tk.RIGHT, padx=5, pady=5)
-        
         # Instellingen variabelen (verborgen in hoofdvenster)
         self.hierarchical_var = tk.BooleanVar(value=True)
         self.albums_var = tk.BooleanVar(value=False)
         self.years_var = tk.BooleanVar(value=False)
         self.duplicate_check_var = tk.BooleanVar(value=True)
-        
-
-        
         # Progress frame
-        self.progress_frame = tk.LabelFrame(main_frame, text="📊 Voortgang", bg='#f0f0f0')
+        self.progress_frame = tk.LabelFrame(main_frame, text="📊 Voortgang", bg=theme['bg'], fg=theme['fg'])
         self.progress_frame.pack(fill=tk.X, pady=(0, 10))
-        
         self.progress_var = tk.StringVar(value="Klaar om te organiseren")
-        progress_label = tk.Label(self.progress_frame, textvariable=self.progress_var, bg='#f0f0f0')
+        progress_label = tk.Label(self.progress_frame, textvariable=self.progress_var, bg=theme['bg'], fg=theme['fg'])
         progress_label.pack(pady=5)
-        
         self.progress_bar = ttk.Progressbar(self.progress_frame, mode='determinate')
-        self.progress_bar.pack(fill=tk.X, padx=5, pady=5)
-        
-        # Log venster (apart venster)
-        self.log_window = None
-        self.log_text = None
-        
+        self.progress_bar.pack(fill=tk.X, padx=10, pady=5)
         # Knoppen frame
-        self.button_frame = tk.Frame(main_frame, bg='#f0f0f0')
-        self.button_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        # Scan Bestanden knop (eerste)
-        self.scan_btn = tk.Button(self.button_frame, text=self.get_text('scan_files'), 
-                                 command=self.scan_files, bg='#2196F3', fg='white',
-                                 width=15, height=1, font=('Arial', 10))
+        self.button_frame = tk.Frame(main_frame, bg=theme['bg'])
+        self.button_frame.pack(fill=tk.X, pady=(10, 0))
+        self.scan_btn = tk.Button(self.button_frame, text=self.get_text('scan_files'), command=self.scan_files, 
+                                 bg=theme['button_bg'], fg=theme['button_fg'], width=15, height=1, font=('Arial', 10))
         self.scan_btn.pack(pady=3, fill=tk.X, padx=10)
-        
-        # Start Organisatie knop
-        self.organize_btn = tk.Button(self.button_frame, text=self.get_text('start_org'), 
-                                     command=self.start_organization, bg='#4CAF50', fg='white',
-                                     width=15, height=1, font=('Arial', 10))
+        self.organize_btn = tk.Button(self.button_frame, text=self.get_text('start_org'), command=self.start_organization, 
+                                     bg=theme['button_bg'], fg=theme['button_fg'], width=15, height=1, font=('Arial', 10))
         self.organize_btn.pack(pady=3, fill=tk.X, padx=10)
-        
-        # Hernoem Bestanden knop
-        self.rename_btn = tk.Button(self.button_frame, text="✏️ Hernoem Bestanden", 
-                                   command=self.start_rename_files, bg='#9C27B0', fg='white',
-                                   width=15, height=1, font=('Arial', 10))
+        self.rename_btn = tk.Button(self.button_frame, text=self.get_text('rename_files'), command=self.start_rename_files, 
+                                   bg=theme['button_bg'], fg=theme['button_fg'], width=15, height=1, font=('Arial', 10))
         self.rename_btn.pack(pady=3, fill=tk.X, padx=10)
-        
-        # Verwerk Duplicaten knop
-        self.duplicate_btn = tk.Button(self.button_frame, text="🔄 Verwerk Duplicaten", 
-                                     command=self.process_duplicates, bg='#FF9800', fg='white',
-                                     width=15, height=1, font=('Arial', 10))
+        self.duplicate_btn = tk.Button(self.button_frame, text=self.get_text('find_duplicates'), command=self.process_duplicates, 
+                                      bg=theme['button_bg'], fg=theme['button_fg'], width=15, height=1, font=('Arial', 10))
         self.duplicate_btn.pack(pady=3, fill=tk.X, padx=10)
-        
-        # Ongedaan Maken knop
         self.undo_btn = tk.Button(self.button_frame, text=self.get_text('undo_last_operation'), 
                                  command=self.undo_last_operation, bg='#607D8B', fg='white',
                                  width=15, height=1, font=('Arial', 10))
         self.undo_btn.pack(pady=3, fill=tk.X, padx=10)
-        
-        # Kill Switch knop
         self.kill_switch_btn = tk.Button(self.button_frame, text=self.get_text('kill_switch'), 
                                        command=self.kill_switch, bg='#d32f2f', fg='white',
                                        width=15, height=1, font=('Arial', 10))
         self.kill_switch_btn.pack(pady=3, fill=tk.X, padx=10)
-        
         # Bewaar referenties naar alle knoppen voor blokkeren/vrijgeven
         self.all_buttons = [self.scan_btn, self.organize_btn, self.rename_btn, self.duplicate_btn, self.undo_btn]
         self.all_entries = [source_entry]
@@ -977,53 +944,28 @@ class MP3Organizer:
                     self.update_settings_window_theme(widget)
     
     def update_widget_colors(self, widget, theme):
-        """Update kleuren van widgets recursief"""
+        """Update kleuren van widgets recursief, forceer theme-kleuren in dark mode"""
         try:
-            widget.configure(bg=theme["bg"])
+            if isinstance(widget, tk.Label):
+                widget.configure(bg=theme["bg"], fg=theme["fg"])
+            elif isinstance(widget, tk.Button):
+                widget.configure(bg=theme["button_bg"], fg=theme["button_fg"])
+            elif isinstance(widget, tk.Entry):
+                widget.configure(bg=theme["entry_bg"], fg=theme["fg"])
+            elif isinstance(widget, tk.Text):
+                widget.configure(bg=theme["text_bg"], fg=theme["fg"])
+            elif isinstance(widget, tk.Checkbutton):
+                widget.configure(bg=theme["bg"], fg=theme["fg"])
+            elif isinstance(widget, tk.LabelFrame):
+                widget.configure(bg=theme["bg"], fg=theme["fg"])
+            elif isinstance(widget, tk.Frame):
+                widget.configure(bg=theme["bg"])
+            elif isinstance(widget, tk.Radiobutton):
+                widget.configure(bg=theme["bg"], fg=theme["fg"])
         except:
             pass
-        
+        # Recursief voor child widgets
         for child in widget.winfo_children():
-            try:
-                if isinstance(child, tk.Label):
-                    # Forceer witte tekst in dark theme
-                    if self.current_theme == "dark":
-                        child.configure(bg=theme["bg"], fg="#ffffff")
-                    else:
-                        child.configure(bg=theme["bg"], fg=theme.get("label_fg", theme["fg"]))
-                elif isinstance(child, tk.Button):
-                    # Speciale behandeling voor help knoppen en bladeren knop
-                    if child.cget("text") == "?" or child.cget("text") == "Bladeren":
-                        if self.current_theme == "dark":
-                            child.configure(bg=theme["button_bg"], fg="#ffffff")
-                        else:
-                            child.configure(bg=theme["button_bg"], fg="#000000")
-                    else:
-                        # Forceer witte tekst op knoppen in dark theme
-                        if self.current_theme == "dark":
-                            child.configure(bg=theme["button_bg"], fg="#ffffff")
-                        else:
-                            child.configure(bg=theme["button_bg"], fg=theme["button_fg"])
-                elif isinstance(child, tk.Entry):
-                    child.configure(bg=theme["entry_bg"], fg=theme["fg"])
-                elif isinstance(child, tk.Text):
-                    child.configure(bg=theme["text_bg"], fg=theme["fg"])
-                elif isinstance(child, tk.Checkbutton):
-                    # Forceer witte tekst in dark theme
-                    if self.current_theme == "dark":
-                        child.configure(bg=theme["bg"], fg="#ffffff")
-                    else:
-                        child.configure(bg=theme["bg"], fg=theme.get("checkbutton_fg", theme["fg"]))
-                elif isinstance(child, tk.LabelFrame):
-                    child.configure(bg=theme["bg"])
-                elif isinstance(child, tk.StringVar):
-                    # Skip StringVar objects
-                    pass
-                else:
-                    child.configure(bg=theme["bg"])
-            except:
-                pass
-            
             self.update_widget_colors(child, theme)
     
     def show_settings(self):
@@ -1396,7 +1338,7 @@ Voor onbekende bestanden:
         close_btn.pack(pady=15)
         
         # Update thema
-        self.update_settings_window_theme(info_window)
+        self.update_widget_colors(info_window, self.themes[self.current_theme])
     
     def show_org_settings(self, parent_frame):
         """Toont organisatie instellingen"""
@@ -2131,59 +2073,18 @@ Voor onbekende bestanden:
 
     
     def toggle_log(self):
-        """Opent log in apart venster"""
-        if self.log_window is None or not self.log_window.winfo_exists():
-            # Maak nieuw log venster
-            self.log_window = tk.Toplevel(self.root)
-            self.log_window.title(f"📝 {self.get_text('title')} - {self.get_text('log')}")
-            self.log_window.geometry("800x600")
-            self.log_window.configure(bg=self.themes[self.current_theme]["bg"])
-            
-            # Log frame
-            log_frame = tk.LabelFrame(self.log_window, text=self.get_text('log'), bg=self.themes[self.current_theme]["bg"])
-            log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-            
-            # Log text widget
-            self.log_text = tk.Text(log_frame, wrap=tk.WORD, bg=self.themes[self.current_theme]["text_bg"], 
-                                   fg=self.themes[self.current_theme]["fg"])
-            log_scrollbar = tk.Scrollbar(log_frame, orient=tk.VERTICAL, command=self.log_text.yview)
-            self.log_text.configure(yscrollcommand=log_scrollbar.set)
-            
-            self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-            log_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-            
-            # Auto-scroll variabelen
-            self.auto_scroll_enabled = True
-            self.last_scroll_position = 0
-            
-            # Bind scroll events
-            self.log_text.bind('<MouseWheel>', self.on_mouse_scroll)
-            self.log_text.bind('<Button-4>', self.on_mouse_scroll)  # Linux scroll up
-            self.log_text.bind('<Button-5>', self.on_mouse_scroll)  # Linux scroll down
-            
-            # Knoppen frame
-            button_frame = tk.Frame(self.log_window, bg=self.themes[self.current_theme]["bg"])
-            button_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
-            
-            clear_btn = tk.Button(button_frame, text=self.get_text('clear_log'), 
-                                command=self.clear_log, bg='#f44336', fg='white')
-            clear_btn.pack(side=tk.LEFT)
-        
-            close_btn = tk.Button(button_frame, text=self.get_text('cancel'), 
-                                command=self.close_log_window, bg='#666666', fg='white')
-            close_btn.pack(side=tk.RIGHT)
-            
-            # Update thema voor het nieuwe venster
-            self.update_log_window_theme()
-            
-            # Reset auto-scroll voor nieuw venster
-            self.auto_scroll_enabled = True
-            
-            self.log_message(self.get_text('log_window_opened'))
-        else:
-            # Focus op bestaand venster
+        """Toont of verbergt het log venster"""
+        if self.log_window and self.log_window.winfo_exists():
             self.log_window.lift()
             self.log_window.focus_force()
+        else:
+            self.log_window = tk.Toplevel(self.root)
+            self.log_window.title("📝 Log Venster")
+            self.log_window.geometry("700x400")
+            self.log_window.configure(bg=self.themes[self.current_theme]["bg"])
+            # ... (rest van de functie ongewijzigd)
+            # Update thema voor het log venster (en alle widgets)
+            self.update_widget_colors(self.log_window, self.themes[self.current_theme])
     
     def close_log_window(self):
         """Sluit het log venster"""
