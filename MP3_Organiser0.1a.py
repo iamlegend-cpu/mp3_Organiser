@@ -66,7 +66,9 @@ class MP3Organizer:
             'ai_detection': True,
             'rename_files': False,
             'rename_format': 'artist_title',
-            'duplicate_output': 'Duplicaten'
+            'duplicate_output': 'Duplicaten',
+            'clean_title_format': True,
+            'undo_enabled': True
         }
         
         # Online database instellingen
@@ -85,6 +87,10 @@ class MP3Organizer:
         # Request limiter voor API calls
         self.request_count = 0
         self.last_request_time = time.time()
+        
+        # Undo functionaliteit
+        self.undo_stack = []  # Bewaart laatste bewerkingen
+        self.max_undo_operations = 5  # Maximum aantal undo operaties
         
         # Taal vertalingen
         self.translations = {
@@ -188,7 +194,16 @@ class MP3Organizer:
                 'use_parent_folder': '📁 Gebruik ouder map als bibliotheek: {path}',
                 'no_library_found': '❌ Geen muziek bibliotheek gevonden',
                 'folder_selected': 'Map geselecteerd: {path}',
-                'library_detected_log': '📁 Muziek bibliotheek gedetecteerd: {path}'
+                'library_detected_log': '📁 Muziek bibliotheek gedetecteerd: {path}',
+                'clean_title_format': 'Titels opschonen (cijfers en punten verwijderen)',
+                'clean_title_explanation': 'Verwijdert cijfers en punten uit titels en formatteert zoals in ID3 tags',
+                'undo_last_operation': '↩️ Ongedaan Maken',
+                'undo_operation': 'Ongedaan maken van laatste bewerking',
+                'undo_available': 'Ongedaan maken beschikbaar',
+                'undo_not_available': 'Geen bewerking om ongedaan te maken',
+                'undo_success': '✅ Laatste bewerking ongedaan gemaakt',
+                'undo_error': '❌ Fout bij ongedaan maken',
+                'undo_confirm': 'Weet je zeker dat je de laatste bewerking wilt ongedaan maken?'
             },
             'English': {
                 'title': 'MP3 Organiser 0.1a',
@@ -290,7 +305,16 @@ class MP3Organizer:
                 'use_parent_folder': '📁 Using parent folder as library: {path}',
                 'no_library_found': '❌ No music library found',
                 'folder_selected': 'Folder selected: {path}',
-                'library_detected_log': '📁 Music library detected: {path}'
+                'library_detected_log': '📁 Music library detected: {path}',
+                'clean_title_format': 'Clean title format (remove numbers and dots)',
+                'clean_title_explanation': 'Removes numbers and dots from titles and formats like in ID3 tags',
+                'undo_last_operation': '↩️ Undo Last Operation',
+                'undo_operation': 'Undo last operation',
+                'undo_available': 'Undo available',
+                'undo_not_available': 'No operation to undo',
+                'undo_success': '✅ Last operation undone',
+                'undo_error': '❌ Error undoing operation',
+                'undo_confirm': 'Are you sure you want to undo the last operation?'
             },
             'Deutsch': {
                 'title': 'MP3 Organiser 0.1a',
@@ -785,17 +809,85 @@ class MP3Organizer:
                                      width=15, height=1, font=('Arial', 10))
         self.organize_btn.pack(pady=3, fill=tk.X, padx=10)
         
+        # Hernoem Bestanden knop
+        self.rename_btn = tk.Button(self.button_frame, text="✏️ Hernoem Bestanden", 
+                                   command=self.start_rename_files, bg='#9C27B0', fg='white',
+                                   width=15, height=1, font=('Arial', 10))
+        self.rename_btn.pack(pady=3, fill=tk.X, padx=10)
+        
         # Verwerk Duplicaten knop
         self.duplicate_btn = tk.Button(self.button_frame, text="🔄 Verwerk Duplicaten", 
                                      command=self.process_duplicates, bg='#FF9800', fg='white',
                                      width=15, height=1, font=('Arial', 10))
         self.duplicate_btn.pack(pady=3, fill=tk.X, padx=10)
         
+        # Ongedaan Maken knop
+        self.undo_btn = tk.Button(self.button_frame, text=self.get_text('undo_last_operation'), 
+                                 command=self.undo_last_operation, bg='#607D8B', fg='white',
+                                 width=15, height=1, font=('Arial', 10))
+        self.undo_btn.pack(pady=3, fill=tk.X, padx=10)
+        
         # Kill Switch knop
         self.kill_switch_btn = tk.Button(self.button_frame, text=self.get_text('kill_switch'), 
                                        command=self.kill_switch, bg='#d32f2f', fg='white',
                                        width=15, height=1, font=('Arial', 10))
         self.kill_switch_btn.pack(pady=3, fill=tk.X, padx=10)
+        
+        # Bewaar referenties naar alle knoppen voor blokkeren/vrijgeven
+        self.all_buttons = [self.scan_btn, self.organize_btn, self.rename_btn, self.duplicate_btn, self.undo_btn]
+        self.all_entries = [source_entry]
+        self.all_menus = [self.menubar]
+    
+    def block_gui(self):
+        """Blokkeert alle GUI elementen behalve stop knop en log venster"""
+        # Blokkeer knoppen
+        for btn in self.all_buttons:
+            btn.config(state=tk.DISABLED)
+        
+        # Blokkeer entry velden
+        for entry in self.all_entries:
+            entry.config(state=tk.DISABLED)
+        
+        # Blokkeer menu's
+        for menu in self.all_menus:
+            menu.entryconfig("⚙️ Instellingen", state=tk.DISABLED)
+            menu.entryconfig("🎨 Thema", state=tk.DISABLED)
+            # Debug menu blijft actief voor log venster
+            # menu.entryconfig("🐛 Debug", state=tk.DISABLED)
+        
+        # Blokkeer bladeren knop
+        for widget in self.root.winfo_children():
+            if isinstance(widget, tk.Frame):
+                for child in widget.winfo_children():
+                    if isinstance(child, tk.LabelFrame):
+                        for grandchild in child.winfo_children():
+                            if isinstance(grandchild, tk.Button) and grandchild.cget("text") == "Bladeren":
+                                grandchild.config(state=tk.DISABLED)
+    
+    def unblock_gui(self):
+        """Geeft alle GUI elementen vrij"""
+        # Vrijgeven knoppen
+        for btn in self.all_buttons:
+            btn.config(state=tk.NORMAL)
+        
+        # Vrijgeven entry velden
+        for entry in self.all_entries:
+            entry.config(state=tk.NORMAL)
+        
+        # Vrijgeven menu's
+        for menu in self.all_menus:
+            menu.entryconfig("⚙️ Instellingen", state=tk.NORMAL)
+            menu.entryconfig("🎨 Thema", state=tk.NORMAL)
+            # menu.entryconfig("🐛 Debug", state=tk.NORMAL)
+        
+        # Vrijgeven bladeren knop
+        for widget in self.root.winfo_children():
+            if isinstance(widget, tk.Frame):
+                for child in widget.winfo_children():
+                    if isinstance(child, tk.LabelFrame):
+                        for grandchild in child.winfo_children():
+                            if isinstance(grandchild, tk.Button) and grandchild.cget("text") == "Bladeren":
+                                grandchild.config(state=tk.NORMAL)
     
     def select_source_folder(self):
         """Selecteert map om te organiseren en detecteert automatisch bibliotheek"""
@@ -838,17 +930,17 @@ class MP3Organizer:
     
     def create_menu(self):
         """Maakt de menubalk aan"""
-        menubar = tk.Menu(self.root)
-        self.root.config(menu=menubar)
+        self.menubar = tk.Menu(self.root)
+        self.root.config(menu=self.menubar)
         
         # Instellingen menu
-        settings_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="⚙️ Instellingen", menu=settings_menu)
+        settings_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label="⚙️ Instellingen", menu=settings_menu)
         settings_menu.add_command(label="🔧 Instellingen", command=self.show_settings)
         
         # Thema menu
-        theme_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="🎨 Thema", menu=theme_menu)
+        theme_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label="🎨 Thema", menu=theme_menu)
         theme_menu.add_command(label="🌞 Light Theme", command=lambda: self.change_theme("light"))
         theme_menu.add_command(label="🌙 Dark Theme", command=lambda: self.change_theme("dark"))
         theme_menu.add_command(label="🌊 Blue Theme", command=lambda: self.change_theme("blue"))
@@ -856,8 +948,8 @@ class MP3Organizer:
         theme_menu.add_command(label="🔥 Orange Theme", command=lambda: self.change_theme("orange"))
         
         # Debug menu
-        debug_menu = tk.Menu(menubar, tearoff=0)
-        menubar.add_cascade(label="🐛 Debug", menu=debug_menu)
+        debug_menu = tk.Menu(self.menubar, tearoff=0)
+        self.menubar.add_cascade(label="🐛 Debug", menu=debug_menu)
         debug_menu.add_command(label="📝 Log", command=self.toggle_log)
     
     def change_theme(self, theme_name):
@@ -1436,6 +1528,21 @@ Voor onbekende bestanden:
                                   bg='#2196F3', fg='#000000')
         rename_help_btn.pack(side=tk.RIGHT, padx=(5, 0))
         
+        # Titel opschonen optie
+        clean_title_frame = tk.Frame(org_frame, bg=self.themes[self.current_theme]["bg"])
+        clean_title_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.clean_title_format_var = tk.BooleanVar(value=self.config.get('clean_title_format', True))
+        clean_title_cb = tk.Checkbutton(clean_title_frame, text=self.get_text('clean_title_format'), 
+                                      variable=self.clean_title_format_var, bg=self.themes[self.current_theme]["bg"],
+                                      fg=self.themes[self.current_theme]["fg"])
+        clean_title_cb.pack(side=tk.LEFT)
+        
+        clean_title_help_btn = tk.Button(clean_title_frame, text="?", width=2, height=1,
+                                       command=lambda: self.show_example("clean_title_format"), 
+                                       bg='#2196F3', fg='#000000')
+        clean_title_help_btn.pack(side=tk.RIGHT, padx=(5, 0))
+        
         # Voorbeeld label
         self.example_label = tk.Label(org_frame, text="", bg=self.themes[self.current_theme]["bg"], 
                                      fg='#666666', font=('Arial', 9), wraplength=400)
@@ -1987,6 +2094,7 @@ Voor onbekende bestanden:
             'ai_detection': getattr(self, 'ai_detect_var', tk.BooleanVar(value=True)).get(),
             'audio_fingerprinting': getattr(self, 'audio_fingerprinting_var', tk.BooleanVar(value=True)).get(),
             'rename_files': getattr(self, 'rename_files_var', tk.BooleanVar(value=False)).get(),
+            'clean_title_format': getattr(self, 'clean_title_format_var', tk.BooleanVar(value=True)).get(),
             'duplicate_output': getattr(self, 'duplicate_output_var', tk.StringVar(value="Duplicaten")).get()
         })
         
@@ -2132,7 +2240,8 @@ Voor onbekende bestanden:
             "duplicates": "🔍 Controleert op duplicaten:\n📁 Bestandsnaam: song.mp3 → song_1.mp3\n🎵 ID3 Tags: 'Michael Jackson - Thriller' → 'Thriller_1.mp3'\n💾 Behoudt origineel, hernoemt duplicaten",
             "duplicate_remove": "🗑️ Automatisch verwijderen:\n📁 Vindt duplicaten op bestandsnaam en ID3 tags\n❌ Verwijdert duplicaten automatisch\n✅ Behoudt alleen het eerste exemplaar\n⚠️ Let op: Dit kan niet ongedaan worden gemaakt",
             "duplicate_move": "📁 Verplaatsen naar output map:\n📂 Maakt 'Duplicaten' map in output directory\n🔄 Verplaatst duplicaten naar deze map\n📝 Hernoemt duplicaten met _1, _2, etc.\n✅ Behoudt alle bestanden",
-            "rename_files": "🔄 Bestanden hernoemen:\n📁 'mark_with_a_k_fear_of_dark.mp3' → 'Mark With a K - Fear of Dark.mp3'\n📁 'ran_d_living_moment.mp3' → 'Ran-D - Living Moment.mp3'\n📁 'keltek_awaken.mp3' → 'Keltek - Awaken.mp3'\n✨ Verwijdert automatisch (official), (remix), etc.\n📝 Gebruikt ID3 tags of bestandsnaam analyse"
+            "rename_files": "🔄 Bestanden hernoemen:\n📁 'mark_with_a_k_fear_of_dark.mp3' → 'Mark With a K - Fear of Dark.mp3'\n📁 'ran_d_living_moment.mp3' → 'Ran-D - Living Moment.mp3'\n📁 'keltek_awaken.mp3' → 'Keltek - Awaken.mp3'\n✨ Verwijdert automatisch (official), (remix), etc.\n📝 Gebruikt ID3 tags of bestandsnaam analyse",
+            "clean_title_format": "🧹 Titel opschonen:\n📁 '01. Fear of Dark.mp3' → 'Fear of Dark.mp3'\n📁 '02. Living Moment.mp3' → 'Living Moment.mp3'\n📁 '03. Awaken.mp3' → 'Awaken.mp3'\n✨ Verwijdert cijfers en punten uit titels\n📝 Formatteert zoals in ID3 tags"
         }
         
         # Check of het huidige voorbeeld al getoond wordt
@@ -2259,24 +2368,134 @@ Voor onbekende bestanden:
         # Print ook naar console voor debugging
         print(log_entry.strip())
     
+    def undo_last_operation(self):
+        """Maakt de laatste bewerking ongedaan"""
+        if not self.undo_stack:
+            messagebox.showinfo("Ongedaan Maken", self.get_text('undo_not_available'))
+            return
+        
+        # Vraag gebruiker om bevestiging
+        result = messagebox.askyesno("Ongedaan Maken", self.get_text('undo_confirm'))
+        if not result:
+            return
+        
+        try:
+            # Haal laatste operatie op
+            last_operation = self.undo_stack.pop()
+            
+            self.log_message("↩️ Start ongedaan maken van laatste bewerking...")
+            
+            # Voer undo operatie uit op basis van type
+            if last_operation['type'] == 'organize':
+                self._undo_organize_operation(last_operation)
+            elif last_operation['type'] == 'rename':
+                self._undo_rename_operation(last_operation)
+            elif last_operation['type'] == 'duplicate':
+                self._undo_duplicate_operation(last_operation)
+            
+            self.log_message(self.get_text('undo_success'))
+            messagebox.showinfo("Ongedaan Maken", self.get_text('undo_success'))
+            
+        except Exception as e:
+            self.log_message(f"{self.get_text('undo_error')}: {str(e)}")
+            messagebox.showerror("Fout", f"{self.get_text('undo_error')}: {str(e)}")
+    
+    def _undo_organize_operation(self, operation):
+        """Maakt organisatie operatie ongedaan"""
+        moved_files = operation.get('moved_files', [])
+        
+        for file_info in moved_files:
+            try:
+                # Verplaats bestand terug naar originele locatie
+                if os.path.exists(file_info['new_path']):
+                    # Maak originele directory aan als deze niet bestaat
+                    os.makedirs(os.path.dirname(file_info['original_path']), exist_ok=True)
+                    
+                    # Verplaats bestand terug
+                    shutil.move(file_info['new_path'], file_info['original_path'])
+                    self.log_message(f"↩️ Teruggeplaatst: {os.path.basename(file_info['new_path'])} → {os.path.basename(file_info['original_path'])}")
+            except Exception as e:
+                self.log_message(f"❌ Fout bij terugplaatsen {os.path.basename(file_info['new_path'])}: {str(e)}")
+    
+    def _undo_rename_operation(self, operation):
+        """Maakt hernoem operatie ongedaan"""
+        renamed_files = operation.get('renamed_files', [])
+        
+        for file_info in renamed_files:
+            try:
+                # Hernoem bestand terug naar originele naam
+                if os.path.exists(file_info['new_path']):
+                    os.rename(file_info['new_path'], file_info['original_path'])
+                    self.log_message(f"↩️ Hernoemd terug: {os.path.basename(file_info['new_path'])} → {os.path.basename(file_info['original_path'])}")
+            except Exception as e:
+                self.log_message(f"❌ Fout bij terughernomen {os.path.basename(file_info['new_path'])}: {str(e)}")
+    
+    def _undo_duplicate_operation(self, operation):
+        """Maakt duplicaten operatie ongedaan"""
+        processed_duplicates = operation.get('processed_duplicates', [])
+        
+        for duplicate_info in processed_duplicates:
+            try:
+                if duplicate_info['action'] == 'moved':
+                    # Verplaats duplicaat terug naar originele locatie
+                    if os.path.exists(duplicate_info['new_path']):
+                        os.makedirs(os.path.dirname(duplicate_info['original_path']), exist_ok=True)
+                        shutil.move(duplicate_info['new_path'], duplicate_info['original_path'])
+                        self.log_message(f"↩️ Duplicaat teruggeplaatst: {os.path.basename(duplicate_info['new_path'])}")
+                
+                elif duplicate_info['action'] == 'deleted':
+                    # Kan niet ongedaan worden gemaakt, toon waarschuwing
+                    self.log_message(f"⚠️ Verwijderd duplicaat kan niet worden hersteld: {os.path.basename(duplicate_info['original_path'])}")
+                    
+            except Exception as e:
+                self.log_message(f"❌ Fout bij ongedaan maken duplicaat: {str(e)}")
+    
+    def _add_undo_operation(self, operation_type, operation_data):
+        """Voegt een operatie toe aan de undo stack"""
+        if not self.config.get('undo_enabled', True):
+            return
+        
+        operation = {
+            'type': operation_type,
+            'timestamp': time.time(),
+            **operation_data
+        }
+        
+        # Voeg toe aan stack
+        self.undo_stack.append(operation)
+        
+        # Behoud alleen de laatste N operaties
+        if len(self.undo_stack) > self.max_undo_operations:
+            self.undo_stack.pop(0)
+        
+        self.log_message(f"📝 Bewerking opgeslagen voor ongedaan maken: {operation_type}")
+    
     def kill_switch(self):
         """Stopt alle verwerking direct"""
         if self.current_thread and self.current_thread.is_alive():
             self.stop_processing = True
             self.log_message("🛑 Stop signaal verzonden...")
             
-            # Wacht maximaal 3 seconden voor thread om te stoppen
-            self.current_thread.join(timeout=3)
-            
-            if self.current_thread.is_alive():
-                self.log_message("⚠️ Thread kon niet veilig gestopt worden")
-            else:
-                self.log_message("✅ Alle verwerking gestopt")
-            
-            # Reset knoppen
-            self.organize_btn.config(state=tk.NORMAL)
-            self.progress_var.set(self.get_text('ready'))
-            self.progress_bar['value'] = 0
+            try:
+                # Wacht maximaal 3 seconden voor thread om te stoppen
+                self.current_thread.join(timeout=3)
+                
+                if self.current_thread.is_alive():
+                    self.log_message("⚠️ Thread kon niet veilig gestopt worden")
+                else:
+                    self.log_message("✅ Alle verwerking gestopt")
+            except Exception as e:
+                self.log_message(f"⚠️ Fout bij stoppen thread: {str(e)}")
+            finally:
+                # Reset thread referentie
+                self.current_thread = None
+                
+                # Vrijgeven GUI
+                self.unblock_gui()
+                
+                # Reset progress
+                self.progress_var.set(self.get_text('ready'))
+                self.progress_bar['value'] = 0
         else:
             self.log_message("ℹ️ Geen actieve verwerking om te stoppen")
     
@@ -2298,170 +2517,194 @@ Voor onbekende bestanden:
             messagebox.showerror(self.get_text('error'), self.get_text('no_library'))
             return
         
-        self.log_message("🔍 Start gedetailleerde scan...")
-        
-        # Vind alle MP3 bestanden
-        mp3_files = []
-        for root, dirs, files in os.walk(source):
-            for file in files:
-                if file.lower().endswith('.mp3'):
-                    mp3_files.append(os.path.join(root, file))
-        
-        total_files = len(mp3_files)
-        self.log_message(f"📁 Totaal gevonden: {total_files} MP3 bestanden")
-        
-        if total_files == 0:
-            self.log_message("❌ Geen MP3 bestanden gevonden!")
-            self.progress_var.set("Geen MP3 bestanden gevonden")
+        # Check of er al een thread actief is
+        if self.current_thread and self.current_thread.is_alive():
+            messagebox.showwarning("Waarschuwing", "Er is al een operatie bezig. Wacht tot deze klaar is.")
             return
         
-        # Update voortgang
-        self.progress_var.set(f"Analyseren van {total_files} bestanden...")
-        self.progress_bar['value'] = 25
+        # Vraag gebruiker om scan type
+        scan_type = messagebox.askyesno(
+            "Scan Type", 
+            "Snelle scan (alleen ID3 tags en bestandsnaam)?\n\n"
+            "Ja = Snelle scan (veel sneller)\n"
+            "Nee = Volledige scan (met online databases en audio fingerprinting)"
+        )
         
-        # Statistieken verzamelen
-        artists_found = {}
-        files_without_artist = []
-        files_in_wrong_location = []
-        duplicate_files = {}
-        file_hashes = {}
+        # Reset kill switch
+        self.stop_processing = False
         
-        # Analyseer elk bestand
-        for i, file_path in enumerate(mp3_files):
-            # Controleer kill switch
-            if self.stop_processing:
-                self.log_message("🛑 Scan gestopt door gebruiker")
-                break
+        # Blokkeer GUI
+        self.block_gui()
+        
+        # Start scan in aparte thread
+        self.current_thread = threading.Thread(target=self._scan_files_thread, args=(source, scan_type))
+        self.current_thread.daemon = True
+        self.current_thread.start()
+    
+    def _scan_files_thread(self, source, scan_type):
+        """Thread functie voor het scannen van bestanden"""
+        try:
+            scan_mode = "Snelle scan" if scan_type else "Volledige scan"
+            self.log_message(f"🔍 Start {scan_mode.lower()}...")
+            
+            # Vind alle MP3 bestanden
+            mp3_files = []
+            for root, dirs, files in os.walk(source):
+                for file in files:
+                    if file.lower().endswith('.mp3'):
+                        mp3_files.append(os.path.join(root, file))
+            
+            total_files = len(mp3_files)
+            self.log_message(f"📁 Totaal gevonden: {total_files} MP3 bestanden")
+            
+            if total_files == 0:
+                self.log_message("❌ Geen MP3 bestanden gevonden!")
+                self.progress_var.set("Geen MP3 bestanden gevonden")
+                return
             
             # Update voortgang
-            progress = 25 + (i / len(mp3_files)) * 50
-            self.progress_bar['value'] = progress
-            self.progress_var.set(f"Analyseren: {i+1}/{total_files}")
+            self.progress_bar['value'] = 25
+            self.progress_var.set(f"Start {scan_mode.lower()} van {total_files} bestanden... (25%)")
             
-            try:
-                filename = os.path.basename(file_path)
+            # Statistieken verzamelen
+            artists_found = {}
+            files_without_artist = []
+            files_in_wrong_location = []
+            duplicate_files = {}
+            file_hashes = {}
+            
+            # Analyseer elk bestand
+            for i, file_path in enumerate(mp3_files):
+                # Controleer kill switch
+                if self.stop_processing:
+                    self.log_message("🛑 Scan gestopt door gebruiker")
+                    break
                 
-                # 1. Detecteer artiest
-                artist = self.detect_artist(file_path)
+                # Update voortgang met percentage
+                progress = 25 + (i / len(mp3_files)) * 50
+                percentage = int((i / len(mp3_files)) * 100)
+                self.progress_bar['value'] = progress
+                self.progress_var.set(f"Analyseren: {i+1}/{total_files} ({percentage}%)")
                 
-                # 2. Check voor bestanden zonder artiest
-                if artist in ['Unknown', 'Onbekend', 'Unknown Artist', 'Onbekende Artiest']:
-                    files_without_artist.append(file_path)
-                    artist = "Onbekende Artiest"
-                
-                # 3. Tel artiesten
-                if artist not in artists_found:
-                    artists_found[artist] = 0
-                artists_found[artist] += 1
-                
-                # 4. Check voor duplicaten (op basis van bestandsnaam)
-                filename_lower = filename.lower()
-                if filename_lower in file_hashes:
-                    if filename_lower not in duplicate_files:
-                        duplicate_files[filename_lower] = []
-                        duplicate_files[filename_lower].append(file_hashes[filename_lower])
-                    duplicate_files[filename_lower].append(file_path)
-                else:
-                    file_hashes[filename_lower] = file_path
-                
-                # 5. Check of bestand op verkeerde locatie staat
-                expected_folder = self.create_hierarchical_folders(self.detected_library, artist, file_path)
-                current_folder = os.path.dirname(file_path)
-                
-                # Normaliseer paden voor vergelijking
-                expected_folder_norm = os.path.normpath(expected_folder)
-                current_folder_norm = os.path.normpath(current_folder)
-                
-                if expected_folder_norm != current_folder_norm:
-                    files_in_wrong_location.append({
-                        'file': file_path,
-                        'current': current_folder_norm,
-                        'expected': expected_folder_norm,
-                        'artist': artist
-                    })
-                
-            except Exception as e:
-                self.log_message(f"❌ Fout bij analyseren {os.path.basename(file_path)}: {str(e)}")
-        
-        # Update voortgang
-        self.progress_bar['value'] = 75
-        self.progress_var.set("Berekenen statistieken...")
-        
-        # Bereken statistieken
-        total_duplicates = sum(len(files) - 1 for files in duplicate_files.values())
-        unique_duplicate_groups = len(duplicate_files)
-        files_in_wrong_place = len(files_in_wrong_location)
-        files_no_artist = len(files_without_artist)
-        unique_artists = len(artists_found)
-        
-        # Toon gedetailleerde resultaten
-        self.log_message("📊 SCAN RESULTATEN:")
-        self.log_message("=" * 50)
-        self.log_message(f"📁 Totaal bestanden: {total_files}")
-        self.log_message(f"🎵 Unieke artiesten: {unique_artists}")
-        self.log_message(f"⚠️  Bestanden zonder artiest: {files_no_artist}")
-        self.log_message(f"🔄 Bestanden op verkeerde locatie: {files_in_wrong_place}")
-        self.log_message(f"📋 Duplicaten gevonden: {unique_duplicate_groups} groepen ({total_duplicates} bestanden)")
-        self.log_message("=" * 50)
-        
-        # Toon details per categorie
-        if files_no_artist > 0:
-            self.log_message("❓ Bestanden zonder artiest:")
-            for file_path in files_without_artist[:5]:  # Toon eerste 5
-                self.log_message(f"  - {os.path.basename(file_path)}")
-            if files_no_artist > 5:
-                self.log_message(f"  ... en nog {files_no_artist - 5} bestanden")
-        
-        if files_in_wrong_place > 0:
-            self.log_message("📍 Bestanden op verkeerde locatie:")
-            for item in files_in_wrong_location[:5]:  # Toon eerste 5
-                filename = os.path.basename(item['file'])
-                self.log_message(f"  - {filename} (A: {item['artist']})")
-                self.log_message(f"    Huidig: {os.path.basename(item['current'])}")
-                self.log_message(f"    Moet naar: {os.path.basename(item['expected'])}")
-            if files_in_wrong_place > 5:
-                self.log_message(f"  ... en nog {files_in_wrong_place - 5} bestanden")
-        
-        if unique_duplicate_groups > 0:
-            self.log_message("📋 Duplicaten gevonden:")
-            for filename, file_list in list(duplicate_files.items())[:5]:  # Toon eerste 5
-                self.log_message(f"  📁 {filename}:")
-                for file_path in file_list:
-                    self.log_message(f"    - {file_path}")
-            if unique_duplicate_groups > 5:
-                self.log_message(f"  ... en nog {unique_duplicate_groups - 5} duplicaat groepen")
-        
-        # Toon top artiesten
-        if artists_found:
-            self.log_message("🎵 Top artiesten:")
-            sorted_artists = sorted(artists_found.items(), key=lambda x: x[1], reverse=True)
-            for artist, count in sorted_artists[:10]:  # Top 10
-                self.log_message(f"  - {artist}: {count} nummers")
-        
-        # Finale samenvatting
-        self.log_message("=" * 50)
-        self.log_message("📈 SAMENVATTING:")
-        self.log_message(f"✅ {total_files - files_no_artist - total_duplicates} bestanden zijn correct georganiseerd")
-        self.log_message(f"⚠️  {files_no_artist + files_in_wrong_place + total_duplicates} bestanden hebben aandacht nodig")
-        
-        # Update voortgang
-        self.progress_bar['value'] = 100
-        self.progress_var.set(f"Scan voltooid: {total_files} bestanden geanalyseerd")
-        
-        # Toon popup met samenvatting
-        summary_text = f"""SCAN RESULTATEN:
-
-📁 Totaal bestanden: {total_files}
-🎵 Unieke artiesten: {unique_artists}
-⚠️  Bestanden zonder artiest: {files_no_artist}
-🔄 Bestanden op verkeerde locatie: {files_in_wrong_place}
-📋 Duplicaten: {unique_duplicate_groups} groepen ({total_duplicates} bestanden)
-
-📈 SAMENVATTING:
-✅ {total_files - files_no_artist - total_duplicates} bestanden zijn correct
-⚠️  {files_no_artist + files_in_wrong_place + total_duplicates} bestanden hebben aandacht nodig"""
-
-        messagebox.showinfo("Scan Resultaten", summary_text)
+                try:
+                    filename = os.path.basename(file_path)
+                    
+                    # Detecteer artiest (verschillende strategie voor snelle vs volledige scan)
+                    if scan_type:
+                        # Snelle scan: alleen ID3 tags en bestandsnaam analyse
+                        artist = self.detect_artist_fast(file_path)
+                    else:
+                        # Volledige scan: alle methoden
+                        artist = self.detect_artist(file_path)
+                    
+                    # 2. Check voor bestanden zonder artiest
+                    if artist in ['Unknown', 'Onbekend', 'Unknown Artist', 'Onbekende Artiest']:
+                        files_without_artist.append(file_path)
+                        artist = "Onbekende Artiest"
+                    
+                    # 3. Tel artiesten
+                    if artist not in artists_found:
+                        artists_found[artist] = 0
+                    artists_found[artist] += 1
+                    
+                    # 4. Check voor duplicaten (op basis van bestandsnaam)
+                    filename_lower = filename.lower()
+                    if filename_lower in file_hashes:
+                        if filename_lower not in duplicate_files:
+                            duplicate_files[filename_lower] = []
+                            duplicate_files[filename_lower].append(file_hashes[filename_lower])
+                        duplicate_files[filename_lower].append(file_path)
+                    else:
+                        file_hashes[filename_lower] = file_path
+                    
+                    # 5. Check of bestand op verkeerde locatie staat
+                    expected_folder = self.create_hierarchical_folders(self.detected_library, artist, file_path)
+                    current_folder = os.path.dirname(file_path)
+                    
+                    # Normaliseer paden voor vergelijking
+                    expected_folder_norm = os.path.normpath(expected_folder)
+                    current_folder_norm = os.path.normpath(current_folder)
+                    
+                    if expected_folder_norm != current_folder_norm:
+                        files_in_wrong_location.append({
+                            'file': file_path,
+                            'current': current_folder_norm,
+                            'expected': expected_folder_norm,
+                            'artist': artist
+                        })
+                    
+                except Exception as e:
+                    self.log_message(f"❌ Fout bij analyseren {os.path.basename(file_path)}: {str(e)}")
+            
+            # Update voortgang
+            self.progress_bar['value'] = 100
+            self.progress_var.set(f"Scan voltooid: {total_files} bestanden geanalyseerd (100%)")
+            
+            # Bereken statistieken
+            total_duplicates = sum(len(files) - 1 for files in duplicate_files.values())
+            unique_duplicate_groups = len(duplicate_files)
+            files_in_wrong_place = len(files_in_wrong_location)
+            files_no_artist = len(files_without_artist)
+            unique_artists = len(artists_found)
+            
+            # Toon gedetailleerde resultaten
+            self.log_message("📊 SCAN RESULTATEN:")
+            self.log_message("=" * 50)
+            self.log_message(f"📁 Totaal bestanden: {total_files}")
+            self.log_message(f"🎵 Unieke artiesten: {unique_artists}")
+            self.log_message(f"⚠️  Bestanden zonder artiest: {files_no_artist}")
+            self.log_message(f"🔄 Bestanden op verkeerde locatie: {files_in_wrong_place}")
+            self.log_message(f"📋 Duplicaten gevonden: {unique_duplicate_groups} groepen ({total_duplicates} bestanden)")
+            self.log_message("=" * 50)
+            
+            # Toon details per categorie
+            if files_no_artist > 0:
+                self.log_message("❓ Bestanden zonder artiest:")
+                for file_path in files_without_artist[:5]:  # Toon eerste 5
+                    self.log_message(f"  - {os.path.basename(file_path)}")
+                if files_no_artist > 5:
+                    self.log_message(f"  ... en nog {files_no_artist - 5} bestanden")
+            
+            if files_in_wrong_place > 0:
+                self.log_message("📍 Bestanden op verkeerde locatie:")
+                for item in files_in_wrong_location[:5]:  # Toon eerste 5
+                    filename = os.path.basename(item['file'])
+                    self.log_message(f"  - {filename} (A: {item['artist']})")
+                    self.log_message(f"    Huidig: {os.path.basename(item['current'])}")
+                    self.log_message(f"    Moet naar: {os.path.basename(item['expected'])}")
+                if files_in_wrong_place > 5:
+                    self.log_message(f"  ... en nog {files_in_wrong_place - 5} bestanden")
+            
+            if unique_duplicate_groups > 0:
+                self.log_message("📋 Duplicaten gevonden:")
+                for filename, file_list in list(duplicate_files.items())[:5]:  # Toon eerste 5
+                    self.log_message(f"  📁 {filename}:")
+                    for file_path in file_list:
+                        self.log_message(f"    - {file_path}")
+                if unique_duplicate_groups > 5:
+                    self.log_message(f"  ... en nog {unique_duplicate_groups - 5} duplicaat groepen")
+            
+            # Toon top artiesten
+            if artists_found:
+                self.log_message("🎵 Top artiesten:")
+                sorted_artists = sorted(artists_found.items(), key=lambda x: x[1], reverse=True)
+                for artist, count in sorted_artists[:10]:  # Top 10
+                    self.log_message(f"  - {artist}: {count} nummers")
+            
+            # Finale samenvatting
+            self.log_message("=" * 50)
+            self.log_message("📈 SAMENVATTING:")
+            self.log_message(f"✅ {total_files - files_no_artist - total_duplicates} bestanden zijn correct georganiseerd")
+            self.log_message(f"⚠️  {files_no_artist + files_in_wrong_place + total_duplicates} bestanden hebben aandacht nodig")
+            
+        except Exception as e:
+            self.log_message(f"❌ Fout tijdens scan: {str(e)}")
+        finally:
+            # Reset thread referentie
+            self.current_thread = None
+            
+            # Vrijgeven GUI
+            self.unblock_gui()
     
     def process_duplicates(self):
         """Verwerkt duplicaten volgens de gekozen instellingen"""
@@ -2476,114 +2719,114 @@ Voor onbekende bestanden:
             messagebox.showinfo("Info", "Duplicaten controle is uitgeschakeld in de instellingen.")
             return
         
-        self.log_message("🔍 Zoeken naar duplicaten...")
-        
-        # Vind alle MP3 bestanden
-        mp3_files = []
-        for root, dirs, files in os.walk(source):
-            for file in files:
-                if file.lower().endswith('.mp3'):
-                    mp3_files.append(os.path.join(root, file))
-        
-        if not mp3_files:
-            self.log_message("❌ Geen MP3 bestanden gevonden!")
-            self.progress_var.set("Geen MP3 bestanden gevonden")
+        # Check of er al een thread actief is
+        if self.current_thread and self.current_thread.is_alive():
+            messagebox.showwarning("Waarschuwing", "Er is al een operatie bezig. Wacht tot deze klaar is.")
             return
         
-        # Update voortgang
-        self.progress_var.set(f"Zoeken naar duplicaten in {len(mp3_files)} bestanden...")
-        self.progress_bar['value'] = 25
+        # Reset kill switch
+        self.stop_processing = False
         
-        # Analyseer duplicaten
-        file_hashes = {}
-        id3_duplicates = {}
-        duplicates = {}
+        # Blokkeer GUI
+        self.block_gui()
         
-        for i, file_path in enumerate(mp3_files):
-            # Controleer kill switch
-            if self.stop_processing:
-                self.log_message("🛑 Duplicaten zoeken gestopt door gebruiker")
-                break
+        # Start duplicaten verwerking in aparte thread
+        self.current_thread = threading.Thread(target=self._process_duplicates_thread, args=(source,))
+        self.current_thread.daemon = True
+        self.current_thread.start()
+    
+    def _process_duplicates_thread(self, source):
+        """Thread functie voor het verwerken van duplicaten"""
+        try:
+            self.log_message("🔍 Zoeken naar duplicaten...")
+            
+            # Vind alle MP3 bestanden
+            mp3_files = []
+            for root, dirs, files in os.walk(source):
+                for file in files:
+                    if file.lower().endswith('.mp3'):
+                        mp3_files.append(os.path.join(root, file))
+            
+            if not mp3_files:
+                self.log_message("❌ Geen MP3 bestanden gevonden!")
+                self.progress_var.set("Geen MP3 bestanden gevonden")
+                return
             
             # Update voortgang
-            progress = 25 + (i / len(mp3_files)) * 25
-            self.progress_bar['value'] = progress
-            self.progress_var.set(f"Analyseren: {i+1}/{len(mp3_files)}")
+            self.progress_var.set(f"Zoeken naar duplicaten in {len(mp3_files)} bestanden... (25%)")
+            self.progress_bar['value'] = 25
             
-            try:
-                # Check 1: Bestandsnaam
-                filename = os.path.basename(file_path).lower()
+            # Analyseer duplicaten
+            file_hashes = {}
+            id3_duplicates = {}
+            duplicates = {}
+            
+            for i, file_path in enumerate(mp3_files):
+                # Controleer kill switch
+                if self.stop_processing:
+                    self.log_message("🛑 Duplicaten zoeken gestopt door gebruiker")
+                    break
                 
-                if filename in file_hashes:
-                    if filename not in duplicates:
-                        duplicates[filename] = []
-                        duplicates[filename].append(file_hashes[filename])
-                    duplicates[filename].append(file_path)
-                else:
-                    file_hashes[filename] = file_path
+                # Update voortgang met percentage
+                progress = 25 + (i / len(mp3_files)) * 25
+                percentage = int((i / len(mp3_files)) * 100)
+                self.progress_bar['value'] = progress
+                self.progress_var.set(f"Analyseren: {i+1}/{len(mp3_files)} ({percentage}%)")
                 
-                # Check 2: ID3 tags (artiest + titel)
                 try:
-                    audio = MP3(file_path, ID3=ID3)
-                    if audio.tags:
-                        artist = audio.tags.get('TPE1', ['Unknown'])[0]
-                        title = audio.tags.get('TIT2', ['Unknown'])[0]
-                        id3_key = f"{artist} - {title}".lower()
-                        
-                        if id3_key in id3_duplicates:
-                            if id3_key not in duplicates:
-                                duplicates[id3_key] = []
-                                duplicates[id3_key].append(id3_duplicates[id3_key])
-                            duplicates[id3_key].append(file_path)
-                        else:
-                            id3_duplicates[id3_key] = file_path
-                except:
-                    # Als ID3 tags niet beschikbaar zijn, skip
-                    pass
+                    # Check 1: Bestandsnaam
+                    filename = os.path.basename(file_path).lower()
                     
-            except Exception as e:
-                self.log_message(f"❌ Fout bij {os.path.basename(file_path)}: {str(e)}")
-        
-        # Update voortgang
-        self.progress_bar['value'] = 50
-        self.progress_var.set("Duplicaten gevonden, verwerking voorbereiden...")
-        
-        # Toon resultaten en verwerk volgens instellingen
-        if duplicates:
-            duplicate_count = len(duplicates)
-            total_duplicate_files = sum(len(files) for files in duplicates.values())
-            self.log_message(f"🔍 {duplicate_count} duplicaten gevonden ({total_duplicate_files} bestanden)")
+                    if filename in file_hashes:
+                        if filename not in duplicates:
+                            duplicates[filename] = []
+                            duplicates[filename].append(file_hashes[filename])
+                        duplicates[filename].append(file_path)
+                    else:
+                        file_hashes[filename] = file_path
+                    
+                    # Check 2: ID3 tags (artiest + titel)
+                    try:
+                        audio = MP3(file_path, ID3=ID3)
+                        if audio.tags and 'TPE1' in audio.tags and 'TIT2' in audio.tags:
+                            artist = audio.tags['TPE1'][0]
+                            title = audio.tags['TIT2'][0]
+                            id3_key = f"{artist.lower()}_{title.lower()}"
+                            
+                            if id3_key in id3_duplicates:
+                                if id3_key not in duplicates:
+                                    duplicates[id3_key] = []
+                                    duplicates[id3_key].append(id3_duplicates[id3_key])
+                                duplicates[id3_key].append(file_path)
+                            else:
+                                id3_duplicates[id3_key] = file_path
+                    except:
+                        pass
+                    
+                except Exception as e:
+                    self.log_message(f"❌ Fout bij analyseren {os.path.basename(file_path)}: {str(e)}")
             
-            # Bepaal actie op basis van instellingen
-            duplicate_remove = self.config.get('duplicate_remove', False)
-            duplicate_move = self.config.get('duplicate_move', False)
+            # Filter alleen echte duplicaten (meer dan 1 bestand)
+            real_duplicates = {k: v for k, v in duplicates.items() if len(v) > 1}
             
-            if duplicate_remove:
-                # Toon waarschuwing voor verwijderen
-                warning_text = f"""⚠️ WAARSCHUWING - DUPLICATEN VERWIJDEREN
-
-Je staat op het punt om {total_duplicate_files} duplicaat bestanden te VERWIJDEREN.
-
-📊 Details:
-- {duplicate_count} duplicaat groepen
-- {total_duplicate_files} bestanden totaal
-- Eerste exemplaar van elk duplicaat wordt BEHOUDEN
-- Alle andere exemplaren worden PERMANENT VERWIJDERD
-
-⚠️ Deze actie kan NIET ongedaan worden gemaakt!
-
-Weet je zeker dat je door wilt gaan?"""
+            if real_duplicates:
+                duplicate_count = len(real_duplicates)
+                total_duplicate_files = sum(len(files) for files in real_duplicates.values())
                 
-                result = messagebox.askyesno("⚠️ Duplicaten Verwijderen", warning_text)
+                self.log_message(f"📋 {duplicate_count} duplicaat groepen gevonden ({total_duplicate_files} bestanden)")
                 
-                if result:
-                    self.log_message("🗑️ Start verwijderen van duplicaten...")
-                    self.progress_var.set("Verwijderen van duplicaten...")
+                # Controleer instellingen voor duplicaten behandeling
+                duplicate_remove = getattr(self, 'duplicate_remove_var', tk.BooleanVar(value=False)).get()
+                duplicate_move = getattr(self, 'duplicate_move_var', tk.BooleanVar(value=False)).get()
+                
+                if duplicate_remove:
+                    # Automatisch verwijderen
+                    self.log_message("🗑️ Automatisch verwijderen van duplicaten...")
+                    self.progress_var.set("Verwijderen duplicaten... (75%)")
                     self.progress_bar['value'] = 75
                     
-                    # Verwijder duplicaten
                     deleted_count = 0
-                    for filename, file_list in duplicates.items():
+                    for filename, file_list in real_duplicates.items():
                         # Behoud eerste bestand, verwijder de rest
                         for file_path in file_list[1:]:
                             try:
@@ -2593,81 +2836,80 @@ Weet je zeker dat je door wilt gaan?"""
                             except Exception as e:
                                 self.log_message(f"❌ Fout bij verwijderen {os.path.basename(file_path)}: {str(e)}")
                     
-                    self.log_message(f"✅ {deleted_count} duplicaten verwijderd!")
-                    self.progress_var.set(f"Voltooid: {deleted_count} duplicaten verwijderd")
+                    self.log_message(f"✅ {deleted_count} duplicaten verwijderd")
+                    self.progress_var.set(f"Verwijdering voltooid: {deleted_count} bestanden (100%)")
                     self.progress_bar['value'] = 100
                     
-                    # Toon samenvatting
-                    messagebox.showinfo("Voltooid", f"✅ Duplicaten verwijderd!\n\n{deleted_count} bestanden verwijderd\n{duplicate_count} duplicaat groepen verwerkt")
-                else:
-                    self.log_message("❌ Verwijderen van duplicaten geannuleerd")
-                    self.progress_var.set("Verwijderen geannuleerd")
-                    self.progress_bar['value'] = 100
-            
-            elif duplicate_move:
-                # Verplaats duplicaten naar map
-                self.log_message("📁 Start verplaatsen van duplicaten...")
-                self.progress_var.set("Verplaatsen van duplicaten...")
-                self.progress_bar['value'] = 75
-                
-                # Bepaal duplicaten map
-                duplicate_output = self.config.get('duplicate_output', 'Duplicaten')
-                if duplicate_output and duplicate_output.strip():
-                    if not os.path.isabs(duplicate_output):
-                        duplicates_folder = os.path.join(source, duplicate_output)
-                    else:
+                    messagebox.showinfo("Duplicaten Verwijderd", f"✅ {deleted_count} duplicaten zijn automatisch verwijderd!")
+                    
+                elif duplicate_move:
+                    # Verplaatsen naar duplicaten map
+                    self.log_message("📁 Verplaatsen van duplicaten...")
+                    self.progress_var.set("Verplaatsen duplicaten... (75%)")
+                    self.progress_bar['value'] = 75
+                    
+                    # Bepaal duplicaten map
+                    duplicate_output = getattr(self, 'duplicate_output_var', tk.StringVar(value="Duplicaten")).get()
+                    if duplicate_output and duplicate_output.strip():
                         duplicates_folder = duplicate_output
-                else:
-                    duplicates_folder = os.path.join(source, "Duplicaten")
-                
-                try:
+                        if not os.path.isabs(duplicates_folder):
+                            duplicates_folder = os.path.join(source, duplicates_folder)
+                    else:
+                        duplicates_folder = os.path.join(source, "Duplicaten")
+                    
                     os.makedirs(duplicates_folder, exist_ok=True)
                     
                     moved_count = 0
-                    for filename, file_list in duplicates.items():
+                    for filename, file_list in real_duplicates.items():
                         # Behoud eerste bestand, verplaats de rest
                         for i, file_path in enumerate(file_list[1:], 1):
-                            base, ext = os.path.splitext(os.path.basename(file_path))
-                            new_filename = f"{base}_{i}{ext}"
-                            dest_path = os.path.join(duplicates_folder, new_filename)
-                            
-                            shutil.move(file_path, dest_path)
-                            moved_count += 1
-                            self.log_message(f"📁 Verplaatst: {os.path.basename(file_path)} → {os.path.basename(duplicates_folder)}/{new_filename}")
+                            try:
+                                base, ext = os.path.splitext(os.path.basename(file_path))
+                                new_filename = f"{base}_{i}{ext}"
+                                dest_path = os.path.join(duplicates_folder, new_filename)
+                                
+                                shutil.move(file_path, dest_path)
+                                moved_count += 1
+                                self.log_message(f"📁 Verplaatst: {os.path.basename(file_path)} → {new_filename}")
+                            except Exception as e:
+                                self.log_message(f"❌ Fout bij verplaatsen {os.path.basename(file_path)}: {str(e)}")
                     
                     self.log_message(f"✅ {moved_count} duplicaten verplaatst naar: {duplicates_folder}")
-                    self.progress_var.set(f"Voltooid: {moved_count} duplicaten verplaatst")
+                    self.progress_var.set(f"Verplaatsing voltooid: {moved_count} bestanden (100%)")
                     self.progress_bar['value'] = 100
                     
-                    # Toon samenvatting
-                    messagebox.showinfo("Voltooid", f"✅ Duplicaten verplaatst!\n\n{moved_count} bestanden verplaatst naar:\n{duplicates_folder}")
+                    messagebox.showinfo("Duplicaten Verplaatst", f"✅ {moved_count} duplicaten zijn verplaatst naar: {duplicates_folder}")
                     
-                except Exception as e:
-                    self.log_message(f"❌ Fout bij verplaatsen duplicaten: {str(e)}")
-                    self.progress_var.set("Fout bij verplaatsen")
+                else:
+                    # Overschrijf bestaande bestanden (standaard gedrag)
+                    self.log_message("⚠️ Geen duplicaten actie ingesteld - bestanden blijven zoals ze zijn")
+                    self.progress_var.set("Geen actie ingesteld (100%)")
                     self.progress_bar['value'] = 100
-            
+                    
+                    # Toon duplicaten overzicht
+                    self.log_message("📋 Duplicaten gevonden:")
+                    for filename, file_list in real_duplicates.items():
+                        self.log_message(f"📁 {filename}:")
+                        for file_path in file_list:
+                            self.log_message(f"  - {file_path}")
+                    
+                    messagebox.showinfo("Duplicaten Gevonden", 
+                                     f"Er zijn {duplicate_count} duplicaten gevonden ({total_duplicate_files} bestanden).\n\n"
+                                     "Ga naar Instellingen → Organisatie Opties om te bepalen wat er met duplicaten moet gebeuren.")
             else:
-                # Overschrijf bestaande bestanden (standaard gedrag)
-                self.log_message("⚠️ Geen duplicaten actie ingesteld - bestanden blijven zoals ze zijn")
-                self.progress_var.set("Geen actie ingesteld")
+                self.log_message("✅ Geen duplicaten gevonden!")
+                self.progress_var.set("Geen duplicaten gevonden (100%)")
                 self.progress_bar['value'] = 100
+                messagebox.showinfo("Geen Duplicaten", "✅ Geen duplicaten gevonden in de geselecteerde map!")
                 
-                # Toon duplicaten overzicht
-                self.log_message("📋 Duplicaten gevonden:")
-                for filename, file_list in duplicates.items():
-                    self.log_message(f"📁 {filename}:")
-                    for file_path in file_list:
-                        self.log_message(f"  - {file_path}")
-                
-                messagebox.showinfo("Duplicaten Gevonden", 
-                                 f"Er zijn {duplicate_count} duplicaten gevonden ({total_duplicate_files} bestanden).\n\n"
-                                 "Ga naar Instellingen → Organisatie Opties om te bepalen wat er met duplicaten moet gebeuren.")
-        else:
-            self.log_message("✅ Geen duplicaten gevonden!")
-            self.progress_var.set("Geen duplicaten gevonden")
-            self.progress_bar['value'] = 100
-            messagebox.showinfo("Geen Duplicaten", "✅ Geen duplicaten gevonden in de geselecteerde map!")
+        except Exception as e:
+            self.log_message(f"❌ Fout tijdens duplicaten verwerking: {str(e)}")
+        finally:
+            # Reset thread referentie
+            self.current_thread = None
+            
+            # Vrijgeven GUI
+            self.unblock_gui()
     
     def find_duplicates(self):
         """Zoekt duplicaten in de bron map en toont overzicht (oude functie voor compatibiliteit)"""
@@ -2735,50 +2977,140 @@ Weet je zeker dat je door wilt gaan?"""
             self.log_message(f"❌ Fout bij verwijderen duplicaten: {str(e)}")
     
     def detect_artist(self, file_path):
-        """Detecteert artiest van MP3 bestand"""
+        """Detecteert artiest van MP3 bestand (geoptimaliseerd voor snelheid)"""
         try:
-            # Probeer ID3 tags
-            audio = MP3(file_path, ID3=ID3)
-            if audio.tags and 'TPE1' in audio.tags:
-                artist = audio.tags['TPE1'][0]
-                return self.normalize_artist_name(artist)
-        except:
-            pass
-        
-        # Probeer online database detectie
-        if self.config.get('online_database', True):
-            online_artist = self.detect_artist_online(file_path)
-            if online_artist:
-                return self.normalize_artist_name(online_artist)
-        
-        # Probeer Shazam-achtige audio fingerprinting
-        if self.config.get('audio_fingerprinting', True) and LIBROSA_AVAILABLE and SCIPY_AVAILABLE:
-            fingerprint_artist = self.detect_artist_by_fingerprint(file_path)
-            if fingerprint_artist:
-                return self.normalize_artist_name(fingerprint_artist)
-        
-        # Analyseer bestandsnaam
-        filename = os.path.basename(file_path).lower()
-        filename = filename.replace('.mp3', '').replace('_', ' ').replace('-', ' ')
-        
-        # Zoek naar bekende artiesten
-        for artist, songs in self.artist_patterns.items():
-            for song in songs:
-                if song in filename:
+            filename = os.path.basename(file_path)
+            filename_hash = hashlib.md5(filename.encode()).hexdigest()
+            
+            # 1. Check cache eerst (snelste optie)
+            cached_result = self.get_cached_artist(filename_hash)
+            if cached_result:
+                return self.normalize_artist_name(cached_result['artist'])
+            
+            # 2. Probeer ID3 tags (snel)
+            try:
+                audio = MP3(file_path, ID3=ID3)
+                if audio.tags and 'TPE1' in audio.tags:
+                    artist = audio.tags['TPE1'][0]
+                    if artist and artist.strip():
+                        # Cache het resultaat
+                        self.cache_artist_info(filename_hash, artist, 1.0, 'ID3')
+                        return self.normalize_artist_name(artist)
+            except:
+                pass
+            
+            # 3. Analyseer bestandsnaam (snel)
+            filename_lower = filename.lower().replace('.mp3', '').replace('_', ' ').replace('-', ' ')
+            
+            # Zoek naar bekende artiesten in bestandsnaam
+            for artist, songs in self.artist_patterns.items():
+                for song in songs:
+                    if song in filename_lower:
+                        # Cache het resultaat
+                        self.cache_artist_info(filename_hash, artist, 0.9, 'filename_pattern')
+                        return self.normalize_artist_name(artist)
+            
+            # Zoek naar artiest naam in bestandsnaam
+            for artist in self.artist_patterns.keys():
+                if artist.lower() in filename_lower:
+                    # Cache het resultaat
+                    self.cache_artist_info(filename_hash, artist, 0.8, 'filename_artist')
                     return self.normalize_artist_name(artist)
-        
-        # Zoek naar artiest naam in bestandsnaam
-        for artist in self.artist_patterns.keys():
-            if artist in filename:
-                return self.normalize_artist_name(artist)
-        
-        return "Unknown Artist"
+            
+            # 4. Online database detectie (alleen als ingeschakeld en geen snelle match)
+            if self.config.get('online_database', True):
+                online_artist = self.detect_artist_online(file_path)
+                if online_artist:
+                    return self.normalize_artist_name(online_artist)
+            
+            # 5. Audio fingerprinting (alleen als ingeschakeld en geen andere match)
+            if self.config.get('audio_fingerprinting', True) and LIBROSA_AVAILABLE and SCIPY_AVAILABLE:
+                fingerprint_artist = self.detect_artist_by_fingerprint(file_path)
+                if fingerprint_artist:
+                    return self.normalize_artist_name(fingerprint_artist)
+            
+            # 6. Fallback: probeer artiest uit bestandsnaam extraheren
+            # Zoek naar patroon "Artiest - Titel" of "Artiest_Titel"
+            parts = filename_lower.split(' - ')
+            if len(parts) > 1:
+                potential_artist = parts[0].strip()
+                if len(potential_artist) > 2 and not potential_artist.isdigit():
+                    # Cache het resultaat
+                    self.cache_artist_info(filename_hash, potential_artist, 0.6, 'filename_extract')
+                    return self.normalize_artist_name(potential_artist)
+            
+            # 7. Laatste fallback
+            return "Unknown Artist"
+            
+        except Exception as e:
+            self.log_message(f"❌ Fout bij artiest detectie voor {os.path.basename(file_path)}: {str(e)}")
+            return "Unknown Artist"
+    
+    def detect_artist_fast(self, file_path):
+        """Detecteert artiest van MP3 bestand (alleen snelle methoden)"""
+        try:
+            filename = os.path.basename(file_path)
+            filename_hash = hashlib.md5(filename.encode()).hexdigest()
+            
+            # 1. Check cache eerst (snelste optie)
+            cached_result = self.get_cached_artist(filename_hash)
+            if cached_result:
+                return self.normalize_artist_name(cached_result['artist'])
+            
+            # 2. Probeer ID3 tags (snel)
+            try:
+                audio = MP3(file_path, ID3=ID3)
+                if audio.tags and 'TPE1' in audio.tags:
+                    artist = audio.tags['TPE1'][0]
+                    if artist and artist.strip():
+                        # Cache het resultaat
+                        self.cache_artist_info(filename_hash, artist, 1.0, 'ID3')
+                        return self.normalize_artist_name(artist)
+            except:
+                pass
+            
+            # 3. Analyseer bestandsnaam (snel)
+            filename_lower = filename.lower().replace('.mp3', '').replace('_', ' ').replace('-', ' ')
+            
+            # Zoek naar bekende artiesten in bestandsnaam
+            for artist, songs in self.artist_patterns.items():
+                for song in songs:
+                    if song in filename_lower:
+                        # Cache het resultaat
+                        self.cache_artist_info(filename_hash, artist, 0.9, 'filename_pattern')
+                        return self.normalize_artist_name(artist)
+            
+            # Zoek naar artiest naam in bestandsnaam
+            for artist in self.artist_patterns.keys():
+                if artist.lower() in filename_lower:
+                    # Cache het resultaat
+                    self.cache_artist_info(filename_hash, artist, 0.8, 'filename_artist')
+                    return self.normalize_artist_name(artist)
+            
+            # 4. Fallback: probeer artiest uit bestandsnaam extraheren
+            # Zoek naar patroon "Artiest - Titel" of "Artiest_Titel"
+            parts = filename_lower.split(' - ')
+            if len(parts) > 1:
+                potential_artist = parts[0].strip()
+                if len(potential_artist) > 2 and not potential_artist.isdigit():
+                    # Cache het resultaat
+                    self.cache_artist_info(filename_hash, potential_artist, 0.6, 'filename_extract')
+                    return self.normalize_artist_name(potential_artist)
+            
+            # 5. Laatste fallback
+            return "Unknown Artist"
+            
+        except Exception as e:
+            return "Unknown Artist"
     
     def init_cache_database(self):
         """Initialiseert de lokale cache database"""
         try:
-            self.cache_db = sqlite3.connect('artist_cache.db')
-            cursor = self.cache_db.cursor()
+            # Maak tijdelijke connectie voor initialisatie
+            db = sqlite3.connect('artist_cache.db')
+            cursor = db.cursor()
+            
+            # Artist cache tabel
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS artist_cache (
                     filename_hash TEXT PRIMARY KEY,
@@ -2788,7 +3120,19 @@ Weet je zeker dat je door wilt gaan?"""
                     timestamp REAL
                 )
             ''')
-            self.cache_db.commit()
+            
+            # Fingerprint cache tabel
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS fingerprint_cache (
+                    fingerprint_hash TEXT PRIMARY KEY,
+                    artist_name TEXT,
+                    confidence REAL,
+                    timestamp REAL
+                )
+            ''')
+            
+            db.commit()
+            db.close()
         except Exception as e:
             self.log_message(f"❌ Fout bij initialiseren cache database: {str(e)}")
     
@@ -2798,7 +3142,9 @@ Weet je zeker dat je door wilt gaan?"""
             return None
         
         try:
-            cursor = self.cache_db.cursor()
+            # Maak nieuwe connectie voor deze thread
+            db = sqlite3.connect('artist_cache.db')
+            cursor = db.cursor()
             cursor.execute('''
                 SELECT artist_name, confidence, timestamp 
                 FROM artist_cache 
@@ -2806,6 +3152,8 @@ Weet je zeker dat je door wilt gaan?"""
             ''', (filename_hash, time.time() - self.online_db_config['cache_duration']))
             
             result = cursor.fetchone()
+            db.close()
+            
             if result:
                 return {
                     'artist': result[0],
@@ -2823,13 +3171,16 @@ Weet je zeker dat je door wilt gaan?"""
             return
         
         try:
-            cursor = self.cache_db.cursor()
+            # Maak nieuwe connectie voor deze thread
+            db = sqlite3.connect('artist_cache.db')
+            cursor = db.cursor()
             cursor.execute('''
                 INSERT OR REPLACE INTO artist_cache 
                 (filename_hash, artist_name, confidence, source, timestamp)
                 VALUES (?, ?, ?, ?, ?)
             ''', (filename_hash, artist_name, confidence, source, time.time()))
-            self.cache_db.commit()
+            db.commit()
+            db.close()
         except Exception as e:
             self.log_message(f"❌ Fout bij opslaan cache: {str(e)}")
     
@@ -2927,12 +3278,14 @@ Weet je zeker dat je door wilt gaan?"""
             return None
     
     def detect_artist_by_fingerprint(self, file_path):
-        """Detecteert artiest via audio fingerprinting (Shazam-achtig)"""
+        """Detecteert artiest via audio fingerprinting (Shazam-achtig) - geoptimaliseerd"""
         if not LIBROSA_AVAILABLE or not SCIPY_AVAILABLE:
             return None
         
         try:
-            self.log_message(f"🎵 Audio fingerprinting voor: {os.path.basename(file_path)}")
+            # Alleen loggen als verbose mode aan staat
+            if self.config.get('verbose_logging', False):
+                self.log_message(f"🎵 Audio fingerprinting voor: {os.path.basename(file_path)}")
             
             # Genereer audio fingerprint
             fingerprint = self.generate_audio_fingerprint(file_path)
@@ -2942,7 +3295,8 @@ Weet je zeker dat je door wilt gaan?"""
             # Zoek in lokale database
             cached_result = self.search_fingerprint_database(fingerprint)
             if cached_result:
-                self.log_message(f"🎯 Fingerprint match gevonden: {cached_result['artist']}")
+                if self.config.get('verbose_logging', False):
+                    self.log_message(f"🎯 Fingerprint match gevonden: {cached_result['artist']}")
                 return cached_result['artist']
             
             # Probeer online fingerprint matching (simulatie)
@@ -2950,13 +3304,15 @@ Weet je zeker dat je door wilt gaan?"""
             if online_result:
                 # Cache het resultaat
                 self.cache_fingerprint_result(fingerprint, online_result['artist'], online_result['confidence'])
-                self.log_message(f"🌐 Online fingerprint match: {online_result['artist']}")
+                if self.config.get('verbose_logging', False):
+                    self.log_message(f"🌐 Online fingerprint match: {online_result['artist']}")
                 return online_result['artist']
             
             return None
             
         except Exception as e:
-            self.log_message(f"❌ Fout bij audio fingerprinting: {str(e)}")
+            if self.config.get('verbose_logging', False):
+                self.log_message(f"❌ Fout bij audio fingerprinting: {str(e)}")
             return None
     
     def generate_audio_fingerprint(self, file_path):
@@ -3039,7 +3395,9 @@ Weet je zeker dat je door wilt gaan?"""
     def search_fingerprint_database(self, fingerprint):
         """Zoekt fingerprint in lokale database"""
         try:
-            cursor = self.cache_db.cursor()
+            # Maak nieuwe connectie voor deze thread
+            db = sqlite3.connect('artist_cache.db')
+            cursor = db.cursor()
             cursor.execute('''
                 SELECT artist_name, confidence, timestamp 
                 FROM fingerprint_cache 
@@ -3047,6 +3405,8 @@ Weet je zeker dat je door wilt gaan?"""
             ''', (fingerprint, time.time() - 86400 * 30))  # 30 dagen cache
             
             result = cursor.fetchone()
+            db.close()
+            
             if result:
                 return {
                     'artist': result[0],
@@ -3088,49 +3448,21 @@ Weet je zeker dat je door wilt gaan?"""
     def cache_fingerprint_result(self, fingerprint, artist, confidence):
         """Slaat fingerprint resultaat op in cache"""
         try:
-            cursor = self.cache_db.cursor()
+            # Maak nieuwe connectie voor deze thread
+            db = sqlite3.connect('artist_cache.db')
+            cursor = db.cursor()
             cursor.execute('''
                 INSERT OR REPLACE INTO fingerprint_cache 
                 (fingerprint_hash, artist_name, confidence, timestamp)
                 VALUES (?, ?, ?, ?)
             ''', (fingerprint, artist, confidence, time.time()))
-            self.cache_db.commit()
+            db.commit()
+            db.close()
         except Exception as e:
             self.log_message(f"❌ Fout bij opslaan fingerprint cache: {str(e)}")
     
-    def init_cache_database(self):
-        """Initialiseert de lokale cache database"""
-        try:
-            self.cache_db = sqlite3.connect('artist_cache.db')
-            cursor = self.cache_db.cursor()
-            
-            # Artist cache tabel
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS artist_cache (
-                    filename_hash TEXT PRIMARY KEY,
-                    artist_name TEXT,
-                    confidence REAL,
-                    source TEXT,
-                    timestamp REAL
-                )
-            ''')
-            
-            # Fingerprint cache tabel
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS fingerprint_cache (
-                    fingerprint_hash TEXT PRIMARY KEY,
-                    artist_name TEXT,
-                    confidence REAL,
-                    timestamp REAL
-                )
-            ''')
-            
-            self.cache_db.commit()
-        except Exception as e:
-            self.log_message(f"❌ Fout bij initialiseren cache database: {str(e)}")
-    
     def detect_artist_online(self, file_path):
-        """Detecteert artiest via online databases"""
+        """Detecteert artiest via online databases (geoptimaliseerd)"""
         if not self.config.get('online_database', True):
             return None
         
@@ -3141,10 +3473,11 @@ Weet je zeker dat je door wilt gaan?"""
             # Controleer cache eerst
             cached_result = self.get_cached_artist(filename_hash)
             if cached_result:
-                self.log_message(f"📡 Cache hit voor: {filename}")
                 return cached_result['artist']
             
-            self.log_message(f"🌐 Zoeken naar artiest voor: {filename}")
+            # Alleen loggen als verbose mode aan staat
+            if self.config.get('verbose_logging', False):
+                self.log_message(f"🌐 Zoeken naar artiest voor: {filename}")
             
             # Probeer verschillende online bronnen
             sources = []
@@ -3177,13 +3510,15 @@ Weet je zeker dat je door wilt gaan?"""
                 # Cache het resultaat
                 self.cache_artist_info(filename_hash, artist_name, confidence, source)
                 
-                self.log_message(f"✅ Artiest gevonden via {source}: {artist_name} (confidence: {confidence:.2f})")
+                if self.config.get('verbose_logging', False):
+                    self.log_message(f"✅ Artiest gevonden via {source}: {artist_name} (confidence: {confidence:.2f})")
                 return artist_name
             
             return None
             
         except Exception as e:
-            self.log_message(f"❌ Fout bij online artiest detectie: {str(e)}")
+            if self.config.get('verbose_logging', False):
+                self.log_message(f"❌ Fout bij online artiest detectie: {str(e)}")
             return None
     
     def detect_title(self, file_path):
@@ -3246,6 +3581,24 @@ Weet je zeker dat je door wilt gaan?"""
         import re
         title = re.sub(r'\([^)]*\)', '', title)
         title = re.sub(r'\[[^\]]*\]', '', title)
+        
+        # Nieuwe functionaliteit: verwijder cijfers en punten aan het begin
+        if self.config.get('clean_title_format', True):
+            # Verwijder cijfers en punten aan het begin van de titel
+            # Patroon: "01. ", "02. ", "1. ", "2. ", etc.
+            title = re.sub(r'^\d+\.\s*', '', title)
+            
+            # Verwijder ook cijfers met haakjes: "(01) ", "(02) ", etc.
+            title = re.sub(r'^\(\d+\)\s*', '', title)
+            
+            # Verwijder cijfers met streepjes: "01-", "02-", etc.
+            title = re.sub(r'^\d+-\s*', '', title)
+            
+            # Verwijder cijfers met underscores: "01_", "02_", etc.
+            title = re.sub(r'^\d+_\s*', '', title)
+            
+            # Verwijder cijfers met spaties: "01 ", "02 ", etc.
+            title = re.sub(r'^\d+\s+', '', title)
         
         # Cleanup
         title = title.strip()
@@ -3409,20 +3762,28 @@ Weet je zeker dat je door wilt gaan?"""
             messagebox.showerror(self.get_text('error'), self.get_text('no_library'))
             return
         
+        # Check of er al een thread actief is
+        if self.current_thread and self.current_thread.is_alive():
+            messagebox.showwarning("Waarschuwing", "Er is al een operatie bezig. Wacht tot deze klaar is.")
+            return
+        
         # Update configuratie
         self.config.update({
             'hierarchical': self.hierarchical_var.get(),
             'include_albums': self.albums_var.get(),
             'include_years': self.years_var.get(),
             'rename_files': getattr(self, 'rename_files_var', tk.BooleanVar(value=False)).get(),
+            'clean_title_format': getattr(self, 'clean_title_format_var', tk.BooleanVar(value=True)).get(),
             'duplicate_output': getattr(self, 'duplicate_output_var', tk.StringVar(value="Duplicaten")).get()
         })
         
         # Reset kill switch
         self.stop_processing = False
         
+        # Blokkeer GUI
+        self.block_gui()
+        
         # Start organisatie in thread
-        self.organize_btn.config(state=tk.DISABLED)
         self.current_thread = threading.Thread(target=self.organize_files, args=(source, self.detected_library))
         self.current_thread.daemon = True
         self.current_thread.start()
@@ -3451,6 +3812,7 @@ Weet je zeker dat je door wilt gaan?"""
             # Organiseer bestanden
             processed = 0
             artists_organized = {}
+            moved_files = []  # Voor undo functionaliteit
             
             for file_path in mp3_files:
                 # Controleer kill switch
@@ -3518,7 +3880,18 @@ Weet je zeker dat je door wilt gaan?"""
                             # Overschrijf bestaande bestanden
                             self.log_message(f"⚠️ Overschrijft bestaand bestand: {filename}")
                     
+                    # Bewaar originele pad voor undo
+                    original_path = file_path
+                    
                     shutil.move(file_path, dest_path)
+                    
+                    # Voeg toe aan undo lijst
+                    moved_files.append({
+                        'original_path': original_path,
+                        'new_path': dest_path,
+                        'artist': artist,
+                        'filename': filename
+                    })
                     
                     # Update statistieken
                     if artist not in artists_organized:
@@ -3526,10 +3899,11 @@ Weet je zeker dat je door wilt gaan?"""
                     artists_organized[artist] += 1
                     processed += 1
                     
-                    # Update progress
+                    # Update progress met percentage
                     progress = (processed / len(mp3_files)) * 100
+                    percentage = int((processed / len(mp3_files)) * 100)
                     self.progress_bar['value'] = progress
-                    self.progress_var.set(f"Verwerkt: {processed}/{len(mp3_files)}")
+                    self.progress_var.set(f"Verwerkt: {processed}/{len(mp3_files)} ({percentage}%)")
                     
                     self.log_message(f"✅ {filename} → {artist}")
                     
@@ -3542,12 +3916,24 @@ Weet je zeker dat je door wilt gaan?"""
             for artist, count in artists_organized.items():
                 self.log_message(f"  - {artist}: {count} nummers")
             
+            # Voeg operatie toe aan undo stack
+            if moved_files:
+                self._add_undo_operation('organize', {
+                    'moved_files': moved_files,
+                    'total_files': len(moved_files),
+                    'artists_organized': artists_organized
+                })
+            
             self.progress_var.set("Organisatie voltooid!")
             
         except Exception as e:
             self.log_message(f"❌ Fout tijdens organisatie: {str(e)}")
         finally:
-            self.organize_btn.config(state=tk.NORMAL)
+            # Reset thread referentie
+            self.current_thread = None
+            
+            # Vrijgeven GUI
+            self.unblock_gui()
     
 
     
@@ -3590,6 +3976,211 @@ Weet je zeker dat je door wilt gaan?"""
         """Start de applicatie"""
         self.root.mainloop()
         self.save_config()
+    
+    def start_rename_files(self):
+        """Start het hernoemen van bestanden in een aparte thread"""
+        source = self.source_var.get()
+        
+        if not source:
+            messagebox.showerror(self.get_text('error'), self.get_text('select_folder_first'))
+            return
+        
+        if not self.detected_library:
+            messagebox.showerror(self.get_text('error'), self.get_text('no_library'))
+            return
+        
+        # Check of er al een thread actief is
+        if self.current_thread and self.current_thread.is_alive():
+            messagebox.showwarning("Waarschuwing", "Er is al een operatie bezig. Wacht tot deze klaar is.")
+            return
+        
+        # Vraag gebruiker om bevestiging
+        result = messagebox.askyesno(
+            "Hernoem Bestanden", 
+            f"Weet je zeker dat je alle MP3 bestanden wilt hernoemen?\n\n"
+            f"Dit zal bestanden hernoemen naar 'Artiest - Titel.mp3' formaat.\n"
+            f"Bestanden worden NIET verplaatst, alleen hernoemd.\n\n"
+            f"Huidige instellingen:\n"
+            f"• Online databases: {'Aan' if self.config.get('online_database', True) else 'Uit'}\n"
+            f"• Audio fingerprinting: {'Aan' if self.config.get('audio_fingerprinting', True) else 'Uit'}\n"
+            f"• Cache: {'Aan' if self.config.get('cache_enabled', True) else 'Uit'}\n"
+            f"• Titel opschonen: {'Aan' if self.config.get('clean_title_format', True) else 'Uit'}\n\n"
+            f"Ja = Start hernoemen\n"
+            f"Nee = Annuleren"
+        )
+        
+        if not result:
+            return
+        
+        # Reset kill switch
+        self.stop_processing = False
+        
+        # Blokkeer GUI
+        self.block_gui()
+        
+        # Start hernoem operatie in thread
+        self.current_thread = threading.Thread(target=self.rename_files, args=(source,))
+        self.current_thread.daemon = True
+        self.current_thread.start()
+    
+    def rename_files(self, source_folder):
+        """Hernoemt MP3 bestanden naar 'Artiest - Titel.mp3' formaat"""
+        try:
+            self.log_message("✏️ Start hernoemen van bestanden...")
+            
+            # Update configuratie voor deze sessie
+            self.config.update({
+                'clean_title_format': getattr(self, 'clean_title_format_var', tk.BooleanVar(value=True)).get()
+            })
+            
+            # Controleer of hernoemen is ingeschakeld in instellingen
+            if not self.config.get('rename_files', False):
+                self.log_message("⚠️ Hernoemen is uitgeschakeld in de instellingen")
+                messagebox.showwarning("Instellingen", "Hernoemen is uitgeschakeld in de instellingen.\nGa naar ⚙️ Instellingen → Organisatie Opties om hernoemen in te schakelen.")
+                return
+            
+            # Vind alle MP3 bestanden
+            mp3_files = []
+            for root, dirs, files in os.walk(source_folder):
+                for file in files:
+                    if file.lower().endswith('.mp3'):
+                        mp3_files.append(os.path.join(root, file))
+            
+            total_files = len(mp3_files)
+            self.log_message(f"📁 Totaal gevonden: {total_files} MP3 bestanden")
+            
+            if total_files == 0:
+                self.log_message("❌ Geen MP3 bestanden gevonden!")
+                self.progress_var.set("Geen MP3 bestanden gevonden")
+                return
+            
+            # Update voortgang
+            self.progress_bar['value'] = 25
+            self.progress_var.set(f"Start hernoemen van {total_files} bestanden... (25%)")
+            
+            # Statistieken
+            renamed_count = 0
+            skipped_count = 0
+            error_count = 0
+            renamed_files = []  # Voor undo functionaliteit
+            
+            # Hernoem elk bestand
+            for i, file_path in enumerate(mp3_files):
+                # Controleer kill switch
+                if self.stop_processing:
+                    self.log_message("🛑 Hernoemen gestopt door gebruiker")
+                    break
+                
+                # Update voortgang met percentage
+                progress = 25 + (i / len(mp3_files)) * 50
+                percentage = int((i / len(mp3_files)) * 100)
+                self.progress_bar['value'] = progress
+                self.progress_var.set(f"Hernoemen: {i+1}/{total_files} ({percentage}%)")
+                
+                try:
+                    filename = os.path.basename(file_path)
+                    directory = os.path.dirname(file_path)
+                    
+                    # Detecteer artiest en titel (gebruik instellingen)
+                    if self.config.get('online_database', True):
+                        # Gebruik volledige detectie met online databases
+                        artist = self.detect_artist(file_path)
+                    else:
+                        # Gebruik alleen snelle detectie
+                        artist = self.detect_artist_fast(file_path)
+                    
+                    title = self.detect_title(file_path)
+                    
+                    # Skip als geen artiest gevonden
+                    if artist in ['Unknown Artist', 'Onbekende Artiest', 'Unknown', 'Onbekend']:
+                        self.log_message(f"⏭️ Overgeslagen: {filename} (geen artiest gevonden)")
+                        skipped_count += 1
+                        continue
+                    
+                    # Maak nieuwe bestandsnaam
+                    new_filename = f"{artist} - {title}.mp3"
+                    
+                    # Controleer of bestandsnaam al correct is
+                    if filename == new_filename:
+                        self.log_message(f"✅ Al correct: {filename}")
+                        skipped_count += 1
+                        continue
+                    
+                    # Controleer of nieuwe bestandsnaam al bestaat
+                    new_file_path = os.path.join(directory, new_filename)
+                    if os.path.exists(new_file_path):
+                        # Voeg nummer toe aan bestandsnaam
+                        base_name = f"{artist} - {title}"
+                        counter = 1
+                        while os.path.exists(new_file_path):
+                            new_filename = f"{base_name} ({counter}).mp3"
+                            new_file_path = os.path.join(directory, new_filename)
+                            counter += 1
+                    
+                    # Bewaar originele pad voor undo
+                    original_path = file_path
+                    
+                    # Hernoem bestand
+                    os.rename(file_path, new_file_path)
+                    
+                    # Voeg toe aan undo lijst
+                    renamed_files.append({
+                        'original_path': original_path,
+                        'new_path': new_file_path,
+                        'original_filename': filename,
+                        'new_filename': new_filename
+                    })
+                    
+                    self.log_message(f"✏️ Hernoemd: {filename} → {new_filename}")
+                    renamed_count += 1
+                    
+                except Exception as e:
+                    self.log_message(f"❌ Fout bij hernoemen {os.path.basename(file_path)}: {str(e)}")
+                    error_count += 1
+            
+            # Update voortgang
+            self.progress_bar['value'] = 100
+            self.progress_var.set(f"Hernoemen voltooid: {total_files} bestanden verwerkt (100%)")
+            
+            # Toon resultaten
+            self.log_message("📊 HERNOEM RESULTATEN:")
+            self.log_message("=" * 50)
+            self.log_message(f"📁 Totaal bestanden: {total_files}")
+            self.log_message(f"✏️ Hernoemd: {renamed_count}")
+            self.log_message(f"⏭️ Overgeslagen: {skipped_count}")
+            self.log_message(f"❌ Fouten: {error_count}")
+            self.log_message("=" * 50)
+            
+            # Toon popup met samenvatting
+            summary_text = f"""HERNOEM RESULTATEN:
+
+📁 Totaal bestanden: {total_files}
+✏️ Hernoemd: {renamed_count}
+⏭️ Overgeslagen: {skipped_count}
+❌ Fouten: {error_count}
+
+✅ Hernoemen voltooid!"""
+
+            # Voeg operatie toe aan undo stack
+            if renamed_files:
+                self._add_undo_operation('rename', {
+                    'renamed_files': renamed_files,
+                    'total_files': len(renamed_files),
+                    'renamed_count': renamed_count,
+                    'skipped_count': skipped_count,
+                    'error_count': error_count
+                })
+            
+            messagebox.showinfo("Hernoem Resultaten", summary_text)
+            
+        except Exception as e:
+            self.log_message(f"❌ Fout tijdens hernoemen: {str(e)}")
+        finally:
+            # Reset thread referentie
+            self.current_thread = None
+            
+            # Vrijgeven GUI
+            self.unblock_gui()
 
 if __name__ == "__main__":
     app = MP3Organizer()

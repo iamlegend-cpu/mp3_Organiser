@@ -1,21 +1,28 @@
-# MP3 Organizer Dependencies
+# MP3 Organizer 0.1a - Dependencies
+# Core dependencies voor MP3 bestandsverwerking en organisatie
 
 # Core dependencies
-mutagen>=1.45.1
-requests>=2.25.1
+mutagen>=1.45.1          # MP3 metadata en ID3 tag verwerking
+requests>=2.25.1         # HTTP requests voor online databases (LastFM, MusicBrainz, Discogs)
 
-# Audio processing for Shazam-like functionality
-librosa>=0.9.2
-scipy>=1.7.0
-numpy>=1.21.0
+# Audio processing voor Shazam-achtige functionaliteit (optioneel)
+librosa>=0.9.2           # Audio analyse en fingerprinting
+scipy>=1.7.0             # Wetenschappelijke berekeningen voor audio processing
+numpy>=1.21.0            # Numerieke berekeningen voor audio analyse
 
-# Optional: For better audio processing
-soundfile>=0.10.3
-resampy>=0.3.1
+# Audio processing dependencies (optioneel)
+soundfile>=0.10.3        # Audio bestand lezen/schrijven
+resampy>=0.3.1           # Audio resampling
 
-# Optional: For advanced audio features
-pyrubberband>=0.1.0
+# Advanced audio features (optioneel)
+pyrubberband>=0.1.0      # Geavanceerde audio processing
 
-# Development dependencies (optional)
-pylint>=2.11.0
-black>=21.7b0 
+# Development en code quality tools (optioneel)
+pylint>=2.11.0           # Code linting en kwaliteitscontrole
+black>=21.7b0            # Code formatting
+
+# Notities:
+# - Alle dependencies zijn compatibel met Python 3.7+
+# - Librosa en scipy zijn optioneel voor audio fingerprinting
+# - Als audio fingerprinting niet beschikbaar is, werkt de app nog steeds
+# - Pylint en black zijn alleen nodig voor development 
